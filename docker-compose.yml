@@ -1,0 +1,14 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:8080
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

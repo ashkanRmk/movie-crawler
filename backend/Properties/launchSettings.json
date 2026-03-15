@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "backend": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5055",
+      "dotnetRunMessages": true
+    }
+  }
+}

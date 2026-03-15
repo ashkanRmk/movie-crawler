@@ -5,12 +5,17 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 export async function fetchCatalog(params: {
   q?: string;
   type?: "all" | "movie" | "tvSeries";
+  sort?: "rate" | "votes" | "date";
   order?: "asc" | "desc";
-}): Promise<CatalogResponse> {
+} = {}): Promise<CatalogResponse> {
   const searchParams = new URLSearchParams();
   if (params.q) searchParams.set("q", params.q);
   if (params.type) searchParams.set("type", params.type);
-  searchParams.set("sort", "rate");
+  if (params.sort) {
+    searchParams.set("sort", params.sort);
+  } else {
+    searchParams.set("sort", "rate");
+  }
   if (params.order) searchParams.set("order", params.order);
 
   const res = await fetch(`${API_BASE}/api/catalog?${searchParams.toString()}`);

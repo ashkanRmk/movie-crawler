@@ -15,8 +15,11 @@ public sealed class CatalogParser
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
 
-        var body = doc.DocumentNode.SelectSingleNode("//body");
-        if (body is null)
+        var root = doc.DocumentNode.SelectSingleNode("//body") ?? doc.DocumentNode;
+
+        var items = new List<CatalogItem>();
+        var headers = root.SelectNodes(".//h3");
+        if (headers is null)
         {
             return new Catalog
             {
@@ -30,26 +33,12 @@ public sealed class CatalogParser
             };
         }
 
-        var items = new List<CatalogItem>();
-        var nodes = body.ChildNodes
-            .Where(n => n.NodeType == HtmlNodeType.Element)
-            .ToList();
-
-        int index = 0;
-        while (index < nodes.Count)
+        foreach (var header in headers)
         {
-            var node = nodes[index];
-            if (!node.Name.Equals("h3", StringComparison.OrdinalIgnoreCase))
-            {
-                index++;
-                continue;
-            }
-
-            var headerText = Normalize(node.InnerText);
+            var headerText = Normalize(header.InnerText);
             var titleMatch = TitleRegex.Match(headerText);
             if (!titleMatch.Success)
             {
-                index++;
                 continue;
             }
 
@@ -61,13 +50,11 @@ public sealed class CatalogParser
             }
 
             var pNodes = new List<HtmlNode>();
-            index++;
-            while (index < nodes.Count)
+            var current = header.NextSibling;
+            while (current is not null)
             {
-                var current = nodes[index];
                 if (current.Name.Equals("hr", StringComparison.OrdinalIgnoreCase))
                 {
-                    index++;
                     break;
                 }
 
@@ -81,7 +68,7 @@ public sealed class CatalogParser
                     pNodes.Add(current);
                 }
 
-                index++;
+                current = current.NextSibling;
             }
 
             var imdbCode = ExtractValue(pNodes, "IMDb Code:");

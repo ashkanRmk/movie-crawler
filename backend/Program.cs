@@ -21,7 +21,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.AllowAnyOrigin()
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -64,11 +64,24 @@ app.MapGet("/api/catalog", (CatalogCache cache, string? q, string? type, string?
     }
 
     var sortKey = string.IsNullOrWhiteSpace(sort) ? "rate" : sort;
+    var ascending = string.Equals(order, "asc", StringComparison.OrdinalIgnoreCase);
     if (sortKey.Equals("rate", StringComparison.OrdinalIgnoreCase))
     {
-        items = string.Equals(order, "asc", StringComparison.OrdinalIgnoreCase)
+        items = ascending
             ? items.OrderBy(item => item.ImdbRate)
             : items.OrderByDescending(item => item.ImdbRate);
+    }
+    else if (sortKey.Equals("votes", StringComparison.OrdinalIgnoreCase))
+    {
+        items = ascending
+            ? items.OrderBy(item => item.ImdbVotes)
+            : items.OrderByDescending(item => item.ImdbVotes);
+    }
+    else if (sortKey.Equals("date", StringComparison.OrdinalIgnoreCase) || sortKey.Equals("year", StringComparison.OrdinalIgnoreCase))
+    {
+        items = ascending
+            ? items.OrderBy(item => item.Year ?? 0)
+            : items.OrderByDescending(item => item.Year ?? 0);
     }
 
     var itemList = items.ToList();
@@ -106,6 +119,16 @@ app.MapPost("/api/catalog/reload", async (CatalogCache cache, CancellationToken 
     {
         meta = catalog.Meta,
         status = "reloaded"
+    });
+});
+
+app.MapGet("/api/catalog/status", (CatalogCache cache) =>
+{
+    return Results.Ok(new
+    {
+        hasCatalog = cache.Current is not null,
+        lastError = cache.LastError,
+        fetch = cache.LastFetchInfo
     });
 });
 

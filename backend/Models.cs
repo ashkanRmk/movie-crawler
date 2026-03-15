@@ -15,6 +15,15 @@ public sealed record CatalogMeta
     public required int ItemCount { get; init; }
 }
 
+public sealed record CatalogFetchInfo
+{
+    public DateTimeOffset? FetchedAt { get; init; }
+    public string? SourceUrl { get; init; }
+    public string? ContentType { get; init; }
+    public int? ContentLength { get; init; }
+    public string? Snippet { get; init; }
+}
+
 public sealed record CatalogItem
 {
     public required string Id { get; init; }

@@ -12,6 +12,7 @@ public sealed class CatalogCache
 
     private Catalog? _catalog;
     private string? _lastError;
+    private CatalogFetchInfo? _lastFetchInfo;
 
     public CatalogCache(IHttpClientFactory httpClientFactory, CatalogParser parser, IConfiguration configuration)
     {
@@ -24,6 +25,7 @@ public sealed class CatalogCache
     public Catalog? Current => _catalog;
     public string? LastError => _lastError;
     public string SourceUrl => _sourceUrl;
+    public CatalogFetchInfo? LastFetchInfo => _lastFetchInfo;
 
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
@@ -50,12 +52,28 @@ public sealed class CatalogCache
 
             var fetchedAt = DateTimeOffset.UtcNow;
             _catalog = _parser.Parse(html, _sourceUrl, fetchedAt);
+            _lastFetchInfo = new CatalogFetchInfo
+            {
+                FetchedAt = fetchedAt,
+                SourceUrl = _sourceUrl,
+                ContentType = response.Content.Headers.ContentType?.ToString(),
+                ContentLength = bytes.Length,
+                Snippet = html.Length <= 1000 ? html : html[..1000]
+            };
             _lastError = null;
             return true;
         }
         catch (Exception ex)
         {
             _lastError = ex.Message;
+            _lastFetchInfo = new CatalogFetchInfo
+            {
+                FetchedAt = null,
+                SourceUrl = _sourceUrl,
+                ContentType = null,
+                ContentLength = null,
+                Snippet = null
+            };
             return false;
         }
         finally
