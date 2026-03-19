@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+
+set -e
+
+########################################
+# CONFIG — CHANGE THESE
+########################################
+
+SERVER_USER="root"
+SERVER_HOST="178.239.151.59"
+REMOTE_DIR="/tmp"
+
+# IMPORTANT: match your server arch
+PLATFORM="linux/amd64"
+# PLATFORM="linux/arm64"
+
+VERSION=${1:-"1.0.0"}
+
+BACKEND_IMAGE="my-backend"
+FRONTEND_IMAGE="my-frontend"
+
+########################################
+# BUILD IMAGES (on Mac)
+########################################
+
+echo "🚀 Building images for platform: $PLATFORM (version: $VERSION)"
+
+docker buildx build \
+  --platform $PLATFORM \
+  -t $BACKEND_IMAGE:$VERSION \
+  --load \
+  ./backend
+
+docker buildx build \
+  --platform $PLATFORM \
+  -t $FRONTEND_IMAGE:$VERSION \
+  --load \
+  ./frontend
+
+########################################
+# SAVE IMAGES
+########################################
+
+echo "📦 Saving images..."
+
+docker image save -o ${BACKEND_IMAGE}_${VERSION}.tar $BACKEND_IMAGE:$VERSION
+docker image save -o ${FRONTEND_IMAGE}_${VERSION}.tar $FRONTEND_IMAGE:$VERSION
+
+########################################
+# COMPRESS
+########################################
+
+echo "🗜 Compressing..."
+
+gzip -f ${BACKEND_IMAGE}_${VERSION}.tar
+gzip -f ${FRONTEND_IMAGE}_${VERSION}.tar
+
+########################################
+# TRANSFER TO SERVER
+########################################
+
+echo "📡 Copying to server..."
+
+scp ${BACKEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
+scp ${FRONTEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
+
+########################################
+# LOAD ON SERVER
+########################################
+
+echo "📥 Loading images on server..."
+
+ssh $SERVER_USER@$SERVER_HOST << EOF
+  set -e
+
+  echo "📂 Moving to $REMOTE_DIR"
+  cd $REMOTE_DIR
+
+  echo "📦 Extracting..."
+  gunzip -f ${BACKEND_IMAGE}_${VERSION}.tar.gz
+  gunzip -f ${FRONTEND_IMAGE}_${VERSION}.tar.gz
+
+  echo "🐳 Loading into Docker..."
+  docker image load -i ${BACKEND_IMAGE}_${VERSION}.tar
+  docker image load -i ${FRONTEND_IMAGE}_${VERSION}.tar
+
+  echo "🧹 Cleanup..."
+  rm -f ${BACKEND_IMAGE}_${VERSION}.tar
+  rm -f ${FRONTEND_IMAGE}_${VERSION}.tar
+
+  echo "✅ Done. Available images:"
+  docker image ls | grep -E "$BACKEND_IMAGE|$FRONTEND_IMAGE"
+EOF
+
+########################################
+# DONE
+########################################
+
+echo ""
+echo "🎉 SUCCESS!"
+echo "Backend image:  $BACKEND_IMAGE:$VERSION"
+echo "Frontend image: $FRONTEND_IMAGE:$VERSION"
+echo ""
+echo "👉 Now go to Coolify and set:"
+echo "   Image = $BACKEND_IMAGE:$VERSION"
+echo "   Image = $FRONTEND_IMAGE:$VERSION"
