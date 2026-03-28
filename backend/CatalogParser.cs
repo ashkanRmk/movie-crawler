@@ -9,6 +9,22 @@ public sealed class CatalogParser
 {
     private static readonly Regex TitleRegex = new(@"^\s*\d+\.\s*(.+?)(?:\s+(\d{4}))?\s*$", RegexOptions.Compiled);
     private static readonly Regex SeasonRegex = new(@"^season\s+(\d+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly string[] DubbedMarkers =
+    [
+        "dubbed",
+        "dub",
+        "dual audio",
+        "bilingual",
+        "dozabane",
+        "do zabane",
+        "dubleh",
+        "duble",
+        "dobleh",
+        "doble",
+        "دوبله",
+        "دو زبانه",
+        "دوزبانه"
+    ];
 
     public Catalog Parse(string html, string sourceUrl, DateTimeOffset fetchedAt)
     {
@@ -103,6 +119,7 @@ public sealed class CatalogParser
                 ParseSeriesDownloads(pNodes, item);
             }
 
+            item = item with { IsDubbed = IsDubbed(item) };
             items.Add(item);
         }
 
@@ -336,6 +353,34 @@ public sealed class CatalogParser
         }
 
         return !label.Contains(':');
+    }
+
+    private static bool IsDubbed(CatalogItem item)
+    {
+        if (HasDubbedMarker(item.Downloads))
+        {
+            return true;
+        }
+
+        return item.Seasons.Any(season => HasDubbedMarker(season.Groups));
+    }
+
+    private static bool HasDubbedMarker(IEnumerable<DownloadGroup> groups)
+        => groups.Any(group =>
+            MatchesDubbedMarker(group.Label) ||
+            group.Links.Any(link =>
+                MatchesDubbedMarker(link.Label) ||
+                MatchesDubbedMarker(link.Size)));
+
+    private static bool MatchesDubbedMarker(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = Normalize(value).ToLowerInvariant();
+        return DubbedMarkers.Any(marker => normalized.Contains(marker, StringComparison.Ordinal));
     }
 
     private static string Normalize(string value)

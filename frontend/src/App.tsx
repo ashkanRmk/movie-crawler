@@ -26,6 +26,7 @@ const ART_STYLES = [
 
 type FilterType = (typeof TYPE_OPTIONS)[number]["value"];
 type SortKey = (typeof SORT_OPTIONS)[number]["value"];
+type DubbedFilter = "all" | "dubbed";
 type SyncState = "idle" | "loading" | "reloading" | "error";
 type ShareState =
   | { tone: "success"; message: string }
@@ -52,6 +53,24 @@ function getArtwork(item: CatalogItem) {
 
 function formatType(type: TitleType): string {
   return type === "Movie" ? "Movie" : "TV Series";
+}
+
+function CardBadges({ item }: { item: CatalogItem }) {
+  return (
+    <div className="card-art-badges">
+      <span className="card-art-badge">{formatType(item.type)}</span>
+      {item.isDubbed ? <span className="card-art-badge dubbed">Dubbed</span> : null}
+    </div>
+  );
+}
+
+function FeaturedBadges({ item }: { item: CatalogItem }) {
+  return (
+    <div className="featured-badges">
+      <span className="featured-badge">{formatType(item.type)}</span>
+      {item.isDubbed ? <span className="featured-badge dubbed">Dubbed</span> : null}
+    </div>
+  );
 }
 
 function formatCompactVotes(votes: number): string {
@@ -138,6 +157,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [typeFilter, setTypeFilter] = useState<FilterType>("all");
+  const [dubbedFilter, setDubbedFilter] = useState<DubbedFilter>("all");
   const [sort, setSort] = useState<SortKey>("rate");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -203,8 +223,12 @@ export default function App() {
       });
     }
 
+    if (dubbedFilter === "dubbed") {
+      next = next.filter((item) => item.isDubbed);
+    }
+
     return sortItems(next, sort, order);
-  }, [deferredQuery, items, order, sort, typeFilter]);
+  }, [deferredQuery, dubbedFilter, items, order, sort, typeFilter]);
 
   const featuredItems = useMemo(() => filteredItems.slice(0, 3), [filteredItems]);
   const browseItems = useMemo(() => filteredItems.slice(3), [filteredItems]);
@@ -415,6 +439,11 @@ export default function App() {
     closeMobileFilters();
   };
 
+  const applyDubbedFilter = (value: DubbedFilter) => {
+    setDubbedFilter(value);
+    closeMobileFilters();
+  };
+
   const applySort = (value: SortKey) => {
     setSort(value);
     closeMobileFilters();
@@ -503,6 +532,26 @@ export default function App() {
               {option.label}
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="filter-block">
+        <span className="filter-label">Audio</span>
+        <div className="chip-row">
+          <button
+            type="button"
+            className={dubbedFilter === "all" ? "chip active" : "chip"}
+            onClick={() => applyDubbedFilter("all")}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            className={dubbedFilter === "dubbed" ? "chip active" : "chip"}
+            onClick={() => applyDubbedFilter("dubbed")}
+          >
+            Dubbed
+          </button>
         </div>
       </div>
 
@@ -657,7 +706,7 @@ export default function App() {
                 >
                   <div className="featured-overlay" />
                   <div className="featured-topline">
-                    <span>{formatType(item.type)}</span>
+                    <FeaturedBadges item={item} />
                     <span>IMDb {item.imdbRate.toFixed(1)}</span>
                   </div>
                   <div className="featured-copy">
@@ -692,7 +741,7 @@ export default function App() {
                   <div className="card-art" style={{ background: artwork.background }}>
                     <div className="card-art-noise" />
                     <span className="card-art-initials">{artwork.initials}</span>
-                    <span className="card-art-badge">{formatType(item.type)}</span>
+                    <CardBadges item={item} />
                   </div>
 
                   <div className="catalog-copy">

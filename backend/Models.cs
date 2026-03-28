@@ -36,6 +36,7 @@ public sealed record CatalogItem
     public required string ImdbCode { get; init; }
     public required double ImdbRate { get; init; }
     public required int ImdbVotes { get; init; }
+    public bool IsDubbed { get; init; }
 
     public List<DownloadGroup> Downloads { get; init; } = [];
     public List<SeasonGroup> Seasons { get; init; } = [];
