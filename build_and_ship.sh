@@ -29,11 +29,11 @@ FRONTEND_REGISTRY_IMAGE="$REGISTRY/$FRONTEND_IMAGE:$VERSION"
 
 echo "🚀 Building images for platform: $PLATFORM (version: $VERSION)"
 
-# docker buildx build \
-#   --platform $PLATFORM \
-#   -t $BACKEND_IMAGE:$VERSION \
-#   --load \
-#   ./backend
+docker buildx build \
+  --platform $PLATFORM \
+  -t $BACKEND_IMAGE:$VERSION \
+  --load \
+  ./backend
 
 docker buildx build \
   --platform $PLATFORM \
@@ -48,7 +48,7 @@ docker buildx build \
 
 echo "📦 Saving images..."
 
-# docker image save -o ${BACKEND_IMAGE}_${VERSION}.tar $BACKEND_IMAGE:$VERSION
+docker image save -o ${BACKEND_IMAGE}_${VERSION}.tar $BACKEND_IMAGE:$VERSION
 docker image save -o ${FRONTEND_IMAGE}_${VERSION}.tar $FRONTEND_IMAGE:$VERSION
 
 ########################################
@@ -57,7 +57,7 @@ docker image save -o ${FRONTEND_IMAGE}_${VERSION}.tar $FRONTEND_IMAGE:$VERSION
 
 echo "🗜 Compressing..."
 
-# gzip -f ${BACKEND_IMAGE}_${VERSION}.tar
+gzip -f ${BACKEND_IMAGE}_${VERSION}.tar
 gzip -f ${FRONTEND_IMAGE}_${VERSION}.tar
 
 ########################################
@@ -66,7 +66,7 @@ gzip -f ${FRONTEND_IMAGE}_${VERSION}.tar
 
 echo "📡 Copying to server..."
 
-# scp ${BACKEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
+scp ${BACKEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
 scp ${FRONTEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
 
 ########################################
@@ -82,23 +82,23 @@ ssh $SERVER_USER@$SERVER_HOST << EOF
   cd $REMOTE_DIR
 
   echo "📦 Extracting..."
-  # gunzip -f ${BACKEND_IMAGE}_${VERSION}.tar.gz
+  gunzip -f ${BACKEND_IMAGE}_${VERSION}.tar.gz
   gunzip -f ${FRONTEND_IMAGE}_${VERSION}.tar.gz
 
   echo "🐳 Loading into Docker..."
-  # docker image load -i ${BACKEND_IMAGE}_${VERSION}.tar
+  docker image load -i ${BACKEND_IMAGE}_${VERSION}.tar
   docker image load -i ${FRONTEND_IMAGE}_${VERSION}.tar
 
   echo "🏷 Tagging images for registry: $REGISTRY"
-  # docker tag $BACKEND_IMAGE:$VERSION $BACKEND_REGISTRY_IMAGE
+  docker tag $BACKEND_IMAGE:$VERSION $BACKEND_REGISTRY_IMAGE
   docker tag $FRONTEND_IMAGE:$VERSION $FRONTEND_REGISTRY_IMAGE
 
   echo "📤 Pushing images to registry..."
-  # docker push $BACKEND_REGISTRY_IMAGE
+  docker push $BACKEND_REGISTRY_IMAGE
   docker push $FRONTEND_REGISTRY_IMAGE
 
   echo "🧹 Cleanup..."
-  # rm -f ${BACKEND_IMAGE}_${VERSION}.tar
+  rm -f ${BACKEND_IMAGE}_${VERSION}.tar
   rm -f ${FRONTEND_IMAGE}_${VERSION}.tar
 
   echo "✅ Done. Available images:"
