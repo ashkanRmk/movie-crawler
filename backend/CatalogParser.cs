@@ -127,7 +127,7 @@ public sealed class CatalogParser
             if (bold is not null)
             {
                 var label = Normalize(bold.InnerText);
-                if (!string.IsNullOrWhiteSpace(label) && !label.StartsWith("IMDb", StringComparison.OrdinalIgnoreCase))
+                if (IsDownloadGroupLabel(label))
                 {
                     currentGroup = EnsureGroup(item.Downloads, label);
                     continue;
@@ -157,7 +157,7 @@ public sealed class CatalogParser
             if (bold is not null)
             {
                 var label = Normalize(bold.InnerText);
-                if (!string.IsNullOrWhiteSpace(label) && !label.StartsWith("IMDb", StringComparison.OrdinalIgnoreCase))
+                if (IsDownloadGroupLabel(label))
                 {
                     pendingGroupLabel = label;
                     currentGroup = currentSeason is not null
@@ -321,6 +321,21 @@ public sealed class CatalogParser
         return double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
             ? value
             : 0;
+    }
+
+    private static bool IsDownloadGroupLabel(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return false;
+        }
+
+        if (label.StartsWith("IMDb", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !label.Contains(':');
     }
 
     private static string Normalize(string value)

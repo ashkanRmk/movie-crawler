@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCatalog, reloadCatalog } from "./api";
+import { fetchCatalog, reloadCatalog, trackEvent } from "./api";
 import type { CatalogItem, CatalogResponse, TitleType } from "./types";
 import "./styles.css";
 
@@ -27,6 +27,10 @@ const ART_STYLES = [
 type FilterType = (typeof TYPE_OPTIONS)[number]["value"];
 type SortKey = (typeof SORT_OPTIONS)[number]["value"];
 type SyncState = "idle" | "loading" | "reloading" | "error";
+type ShareState =
+  | { tone: "success"; message: string }
+  | { tone: "error"; message: string }
+  | null;
 
 function hashTitle(value: string): number {
   return value.split("").reduce((acc, char) => acc * 31 + char.charCodeAt(0), 7);
@@ -91,6 +95,18 @@ const ImdbIcon = () => (
   </svg>
 );
 
+const MenuIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      d="M4 7h16M4 12h16M4 17h16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 function SkeletonCards() {
   return (
     <section className="browse-grid" aria-hidden="true">
@@ -107,6 +123,14 @@ function SkeletonCards() {
 }
 
 export default function App() {
+  const readRequestedTitle = () => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return new URL(window.location.href).searchParams.get("title");
+  };
+
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [meta, setMeta] = useState<CatalogResponse["meta"] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,11 +142,16 @@ export default function App() {
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   const [batchSize, setBatchSize] = useState(18);
   const [renderedCount, setRenderedCount] = useState(18);
+  const [pendingSharedTitle, setPendingSharedTitle] = useState<string | null>(() => readRequestedTitle());
+  const [shareState, setShareState] = useState<ShareState>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const trackedSharedOpensRef = useRef<Set<string>>(new Set());
+  const mobileFilterRef = useRef<HTMLElement | null>(null);
 
   const loadCatalog = async (mode: "initial" | "reload") => {
     setError(null);
@@ -145,6 +174,15 @@ export default function App() {
 
   useEffect(() => {
     void loadCatalog("initial");
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setPendingSharedTitle(readRequestedTitle());
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   const filteredItems = useMemo(() => {
@@ -214,14 +252,80 @@ export default function App() {
   }, [isDrawerOpen]);
 
   useEffect(() => {
-    if (!isDrawerOpen) {
+    if (!isMobileFilterOpen) {
+      return;
+    }
+
+    const focusTarget = mobileFilterRef.current?.querySelector<HTMLElement>(
+      "button, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+    );
+    focusTarget?.focus();
+  }, [isMobileFilterOpen]);
+
+  useEffect(() => {
+    setShareState(null);
+  }, [activeId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    if (isDrawerOpen && activeItem) {
+      url.searchParams.set("title", activeItem.imdbCode);
+    } else if (!pendingSharedTitle) {
+      url.searchParams.delete("title");
+    } else {
+      return;
+    }
+
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [activeItem, isDrawerOpen, pendingSharedTitle]);
+
+  useEffect(() => {
+    if (!pendingSharedTitle) {
+      setActiveId(null);
+      setIsDrawerOpen(false);
+      return;
+    }
+
+    if (items.length === 0) {
+      return;
+    }
+
+    const matchedItem = items.find((item) => item.imdbCode === pendingSharedTitle);
+    if (!matchedItem) {
+      return;
+    }
+
+    setActiveId(matchedItem.id);
+    setIsDrawerOpen(true);
+
+    if (!trackedSharedOpensRef.current.has(pendingSharedTitle)) {
+      trackedSharedOpensRef.current.add(pendingSharedTitle);
+      void trackEvent("share_opened", {
+        itemId: matchedItem.id,
+        imdbCode: matchedItem.imdbCode,
+        method: "deep_link"
+      }).catch(() => undefined);
+    }
+  }, [items, pendingSharedTitle]);
+
+  useEffect(() => {
+    if (!isDrawerOpen && !isMobileFilterOpen) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        setIsDrawerOpen(false);
+        if (isDrawerOpen) {
+          closeDrawer();
+          return;
+        }
+
+        closeMobileFilters();
         return;
       }
 
@@ -270,7 +374,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeId, isDrawerOpen, navigableItems]);
+  }, [activeId, isDrawerOpen, isMobileFilterOpen, navigableItems]);
 
   useEffect(() => {
     const node = loadMoreRef.current;
@@ -294,17 +398,188 @@ export default function App() {
   }, [batchSize, browseItems.length, renderedCount]);
 
   const openItem = (itemId: string) => {
+    setIsMobileFilterOpen(false);
     setActiveId(itemId);
     setIsDrawerOpen(true);
   };
 
+  const closeDrawer = () => {
+    setActiveId(null);
+    setIsDrawerOpen(false);
+    setPendingSharedTitle(null);
+  };
+
+  const closeMobileFilters = () => {
+    setIsMobileFilterOpen(false);
+  };
+
+  const toggleMobileFilters = () => {
+    setIsMobileFilterOpen((prev) => !prev);
+  };
+
+  const applyTypeFilter = (value: FilterType) => {
+    setTypeFilter(value);
+    closeMobileFilters();
+  };
+
+  const applySort = (value: SortKey) => {
+    setSort(value);
+    closeMobileFilters();
+  };
+
+  const toggleOrder = () => {
+    setOrder((current) => (current === "desc" ? "asc" : "desc"));
+    closeMobileFilters();
+  };
+
+  const applyBatchSize = (size: number) => {
+    setBatchSize(size);
+    closeMobileFilters();
+  };
+
+  const reloadFromFilters = () => {
+    closeMobileFilters();
+    void loadCatalog("reload");
+  };
+
+  const shareTitle = async (item: CatalogItem) => {
+    const shareUrl = new URL(window.location.href);
+    shareUrl.searchParams.set("title", item.imdbCode);
+
+    const method = typeof navigator !== "undefined" && typeof navigator.share === "function"
+      ? "web_share"
+      : "copy_link";
+
+    void trackEvent("share_clicked", {
+      itemId: item.id,
+      imdbCode: item.imdbCode,
+      method
+    }).catch(() => undefined);
+
+    try {
+      if (method === "web_share") {
+        await navigator.share({
+          title: item.title,
+          text: `Open ${item.title} in the archive.`,
+          url: shareUrl.toString()
+        });
+        setShareState({ tone: "success", message: "Shared" });
+        return;
+      }
+
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard sharing is not available in this browser.");
+      }
+
+      await navigator.clipboard.writeText(shareUrl.toString());
+      setShareState({ tone: "success", message: "Link copied" });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+
+      setShareState({
+        tone: "error",
+        message: err instanceof Error ? err.message : "Share failed"
+      });
+    }
+  };
+
   const hasNoResults = syncState !== "loading" && filteredItems.length === 0 && !error;
   const lastSyncLabel = meta ? new Date(meta.fetchedAt).toLocaleString() : "Not synced yet";
+  const appClassName = isDrawerOpen || isMobileFilterOpen ? "app drawer-active" : "app";
+
+  const searchControl = (
+    <label className="hero-search">
+      <span className="sr-only">Search titles</span>
+      <input
+        type="search"
+        placeholder="Search title, series, franchise..."
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+    </label>
+  );
+
+  const filterControls = (
+    <>
+      <div className="filter-block">
+        <span className="filter-label">Type</span>
+        <div className="chip-row">
+          {TYPE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={typeFilter === option.value ? "chip active" : "chip"}
+              onClick={() => applyTypeFilter(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="filter-block">
+        <span className="filter-label">Sort</span>
+        <div className="chip-row">
+          {SORT_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={sort === option.value ? "chip active" : "chip"}
+              onClick={() => applySort(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="filter-block compact">
+        <span className="filter-label">Direction</span>
+        <button type="button" className="chip" onClick={toggleOrder}>
+          {order === "desc" ? "High to Low" : "Low to High"}
+        </button>
+      </div>
+
+      <div className="filter-block compact">
+        <span className="filter-label">Flow</span>
+        <div className="chip-row">
+          {[18, 30, 48].map((size) => (
+            <button
+              key={size}
+              type="button"
+              className={batchSize === size ? "chip active" : "chip"}
+              onClick={() => applyBatchSize(size)}
+            >
+              {size}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="filter-block compact">
+        <span className="filter-label">Sync</span>
+        <button
+          type="button"
+          className="chip chip-accent"
+          onClick={reloadFromFilters}
+          disabled={syncState === "loading" || syncState === "reloading"}
+        >
+          {syncState === "reloading" ? "Refreshing..." : "Reload source"}
+        </button>
+      </div>
+    </>
+  );
 
   return (
-    <div className={isDrawerOpen ? "app drawer-active" : "app"}>
+    <div className={appClassName}>
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
+
+      <section className="mobile-search-bar glass-panel">
+        {searchControl}
+      </section>
 
       <section className="hero glass-panel">
         <div className="hero-copy">
@@ -314,15 +589,17 @@ export default function App() {
             Explore standout titles, refine the catalog instantly, and open download options in a
             dedicated side panel without losing your place.
           </p>
-          <label className="hero-search">
-            <span className="sr-only">Search titles</span>
-            <input
-              type="search"
-              placeholder="Search title, series, franchise..."
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
+          <div className="hero-search-desktop">{searchControl}</div>
+          <button
+            type="button"
+            className="mobile-filter-trigger"
+            onClick={toggleMobileFilters}
+            aria-expanded={isMobileFilterOpen}
+            aria-controls="mobile-filter-drawer"
+          >
+            <MenuIcon />
+            Filters & sort
+          </button>
         </div>
 
         <div className="hero-side">
@@ -342,76 +619,7 @@ export default function App() {
       </section>
 
       <section className="filter-rail glass-panel">
-        <div className="filter-block">
-          <span className="filter-label">Type</span>
-          <div className="chip-row">
-            {TYPE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={typeFilter === option.value ? "chip active" : "chip"}
-                onClick={() => setTypeFilter(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="filter-block">
-          <span className="filter-label">Sort</span>
-          <div className="chip-row">
-            {SORT_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={sort === option.value ? "chip active" : "chip"}
-                onClick={() => setSort(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="filter-block compact">
-          <span className="filter-label">Direction</span>
-          <button
-            type="button"
-            className="chip"
-            onClick={() => setOrder(order === "desc" ? "asc" : "desc")}
-          >
-            {order === "desc" ? "High to Low" : "Low to High"}
-          </button>
-        </div>
-
-        <div className="filter-block compact">
-          <span className="filter-label">Flow</span>
-          <div className="chip-row">
-            {[18, 30, 48].map((size) => (
-              <button
-                key={size}
-                type="button"
-                className={batchSize === size ? "chip active" : "chip"}
-                onClick={() => setBatchSize(size)}
-              >
-                {size}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="filter-block compact">
-          <span className="filter-label">Sync</span>
-          <button
-            type="button"
-            className="chip chip-accent"
-            onClick={() => void loadCatalog("reload")}
-            disabled={syncState === "loading" || syncState === "reloading"}
-          >
-            {syncState === "reloading" ? "Refreshing..." : "Reload source"}
-          </button>
-        </div>
+        {filterControls}
       </section>
 
       {error ? (
@@ -531,12 +739,41 @@ export default function App() {
         </section>
       ) : null}
 
+      <div className={isMobileFilterOpen ? "mobile-filter-shell open" : "mobile-filter-shell"}>
+        <button
+          type="button"
+          className="drawer-backdrop"
+          aria-label="Close filter panel"
+          onClick={closeMobileFilters}
+        />
+        <aside
+          id="mobile-filter-drawer"
+          ref={mobileFilterRef}
+          className="mobile-filter-drawer glass-panel"
+          aria-hidden={!isMobileFilterOpen}
+          aria-label="Catalog filters"
+        >
+          <div className="mobile-filter-header">
+            <div>
+              <p className="section-kicker">Browse controls</p>
+              <h2>Filters & sort</h2>
+            </div>
+            <button type="button" className="drawer-close" onClick={closeMobileFilters}>
+              Close
+            </button>
+          </div>
+          <div className="mobile-filter-body">
+            {filterControls}
+          </div>
+        </aside>
+      </div>
+
       <div className={isDrawerOpen ? "drawer-shell open" : "drawer-shell"}>
         <button
           type="button"
           className="drawer-backdrop"
           aria-label="Close detail panel"
-          onClick={() => setIsDrawerOpen(false)}
+          onClick={closeDrawer}
         />
         <aside
           ref={drawerRef}
@@ -548,7 +785,7 @@ export default function App() {
             <>
               <div className="drawer-hero" style={{ background: getArtwork(activeItem).background }}>
                 <div className="drawer-hero-overlay" />
-                <button type="button" className="drawer-close" onClick={() => setIsDrawerOpen(false)}>
+                <button type="button" className="drawer-close" onClick={closeDrawer}>
                   Close
                 </button>
                 <div className="drawer-hero-copy">
@@ -563,6 +800,13 @@ export default function App() {
 
               <div className="drawer-body">
                 <div className="drawer-actions">
+                  <button
+                    type="button"
+                    className="drawer-share-button"
+                    onClick={() => void shareTitle(activeItem)}
+                  >
+                    Share title
+                  </button>
                   <a
                     className="imdb-link"
                     href={`https://www.imdb.com/title/${activeItem.imdbCode}`}
@@ -573,6 +817,11 @@ export default function App() {
                     Open on IMDb
                   </a>
                 </div>
+                {shareState ? (
+                  <p className={shareState.tone === "success" ? "drawer-status success" : "drawer-status error"}>
+                    {shareState.message}
+                  </p>
+                ) : null}
 
                 {activeItem.type === "Movie" ? (
                   <div className="download-stack">

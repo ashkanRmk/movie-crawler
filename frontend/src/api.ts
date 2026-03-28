@@ -1,4 +1,4 @@
-import type { CatalogResponse } from "./types";
+import type { CatalogResponse, ShareEventName, ShareEventPayload } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -32,4 +32,14 @@ export async function reloadCatalog(): Promise<void> {
   if (!res.ok) {
     throw new Error(`Reload failed: ${res.status}`);
   }
+}
+
+export async function trackEvent(name: ShareEventName, payload: ShareEventPayload): Promise<void> {
+  await fetch(`${API_BASE}/api/events`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ name, payload })
+  });
 }
