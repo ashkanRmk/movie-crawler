@@ -38,11 +38,3 @@ export interface CatalogResponse {
   meta: CatalogMeta;
   items: CatalogItem[];
 }
-
-export type ShareEventName = "share_clicked" | "share_opened";
-
-export interface ShareEventPayload {
-  itemId: string;
-  imdbCode: string;
-  method?: "web_share" | "copy_link" | "deep_link";
-}

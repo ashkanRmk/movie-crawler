@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCatalog, reloadCatalog, trackEvent } from "./api";
+import { fetchCatalog, reloadCatalog } from "./api";
 import type { CatalogItem, CatalogResponse, TitleType } from "./types";
 import "./styles.css";
 
@@ -302,14 +302,7 @@ export default function App() {
     setActiveId(matchedItem.id);
     setIsDrawerOpen(true);
 
-    if (!trackedSharedOpensRef.current.has(pendingSharedTitle)) {
-      trackedSharedOpensRef.current.add(pendingSharedTitle);
-      void trackEvent("share_opened", {
-        itemId: matchedItem.id,
-        imdbCode: matchedItem.imdbCode,
-        method: "deep_link"
-      }).catch(() => undefined);
-    }
+    trackedSharedOpensRef.current.add(pendingSharedTitle);
   }, [items, pendingSharedTitle]);
 
   useEffect(() => {
@@ -449,12 +442,6 @@ export default function App() {
     const method = typeof navigator !== "undefined" && typeof navigator.share === "function"
       ? "web_share"
       : "copy_link";
-
-    void trackEvent("share_clicked", {
-      itemId: item.id,
-      imdbCode: item.imdbCode,
-      method
-    }).catch(() => undefined);
 
     try {
       if (method === "web_share") {

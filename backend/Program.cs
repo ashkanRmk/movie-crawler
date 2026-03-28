@@ -7,7 +7,6 @@ Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 builder.Services.AddSingleton<CatalogParser>();
 builder.Services.AddSingleton<CatalogCache>();
-builder.Services.AddSingleton<EventMetricsStore>();
 builder.Services.AddHostedService<CatalogWarmupService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -131,33 +130,6 @@ app.MapGet("/api/catalog/status", (CatalogCache cache) =>
         lastError = cache.LastError,
         fetch = cache.LastFetchInfo
     });
-});
-
-app.MapPost("/api/events", (EventMetricsStore store, ShareEventRequest request) =>
-{
-    if (!store.IsAllowed(request.Name))
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["name"] = ["Unsupported event name."]
-        });
-    }
-
-    if (string.IsNullOrWhiteSpace(request.Payload.ItemId) || string.IsNullOrWhiteSpace(request.Payload.ImdbCode))
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["payload"] = ["itemId and imdbCode are required."]
-        });
-    }
-
-    store.Track(request);
-    return Results.Accepted();
-});
-
-app.MapGet("/api/events/share", (EventMetricsStore store) =>
-{
-    return Results.Ok(store.GetSnapshot());
 });
 
 app.Run();
