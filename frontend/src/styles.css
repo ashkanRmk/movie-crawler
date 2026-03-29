@@ -191,6 +191,14 @@ button {
   gap: 12px;
 }
 
+.mobile-sticky-controls {
+  display: none;
+}
+
+.mobile-sort-trigger {
+  display: none;
+}
+
 .hero-sort-controls {
   display: grid;
   gap: 8px;
@@ -276,6 +284,12 @@ button {
   margin-top: 26px;
 }
 
+.browse-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .category-scroll {
   position: relative;
   z-index: 1;
@@ -289,8 +303,9 @@ button {
   padding-bottom: 8px;
   scroll-snap-type: x mandatory;
   cursor: grab;
-  touch-action: pan-y;
+  touch-action: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 
 .category-scroll::-webkit-scrollbar {
@@ -726,6 +741,95 @@ button {
   text-align: center;
 }
 
+.scroll-top-fab {
+  position: fixed;
+  left: 16px;
+  bottom: 18px;
+  z-index: 45;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(10, 16, 30, 0.88);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+}
+
+.mobile-sort-sheet {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 46;
+}
+
+.mobile-sort-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(4, 8, 14, 0);
+  transition: background 0.25s ease;
+}
+
+.mobile-sort-panel {
+  position: absolute;
+  right: 0;
+  left: 0;
+  bottom: 0;
+  padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  background: rgba(12, 20, 38, 0.96);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  transform: translateY(100%);
+  transition: transform 0.25s ease;
+  display: grid;
+  gap: 16px;
+}
+
+.mobile-sort-sheet.open {
+  pointer-events: auto;
+}
+
+.mobile-sort-sheet.open .mobile-sort-backdrop {
+  background: rgba(4, 8, 14, 0.48);
+  backdrop-filter: blur(4px);
+}
+
+.mobile-sort-sheet.open .mobile-sort-panel {
+  transform: translateY(0);
+}
+
+.mobile-sort-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-sort-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.mobile-sort-close {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.mobile-sort-group {
+  display: grid;
+  gap: 8px;
+}
+
 @media (max-width: 900px) {
   .app {
     padding: 14px 14px 36px;
@@ -736,12 +840,67 @@ button {
     flex-direction: column;
   }
 
+  .vitrin-header {
+    width: 100%;
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .scroll-top-fab {
+    left: 12px;
+    bottom: 12px;
+    width: 40px;
+    height: 40px;
+  }
+
   .hero-search input {
     width: 100%;
   }
 
+  .hero-controls {
+    display: none;
+  }
+
+  .mobile-sticky-controls {
+    display: grid;
+    position: sticky;
+    top: 8px;
+    z-index: 20;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    align-items: center;
+    padding: 8px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(8, 14, 28, 0.9);
+    backdrop-filter: blur(10px);
+  }
+
+  .mobile-sticky-controls .hero-search {
+    min-width: 0;
+  }
+
+  .mobile-sticky-controls .hero-search input {
+    width: 100%;
+    margin: 0;
+  }
+
+  .mobile-sort-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
   .hero-sort-controls {
-    gap: 8px;
+    display: none;
   }
 
   .category-scroll {
@@ -770,6 +929,25 @@ button {
   }
 
   .drawer-meta-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .drawer-meta-item {
+    padding: 8px;
+  }
+
+  .drawer-meta-item span {
+    font-size: 0.72rem;
+  }
+
+  .drawer-meta-item strong {
+    font-size: 0.88rem;
+  }
+}
+
+@media (min-width: 901px) {
+  .mobile-sort-sheet {
+    display: none;
   }
 }

@@ -58,7 +58,7 @@ function CardBadges({ item }: { item: CatalogItem }) {
   return (
     <div className="card-art-badges">
       <span className="card-art-badge">{formatType(item.type)}</span>
-      {item.isDubbed ? <span className="card-art-badge dubbed">نسخه دوبله شده</span> : null}
+      {item.isDubbed ? <span className="card-art-badge dubbed">دوبله شده</span> : null}
     </div>
   );
 }
@@ -336,6 +336,8 @@ export default function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [pendingSharedTitle, setPendingSharedTitle] = useState<string | null>(() => readRequestedTitle());
   const [shareState, setShareState] = useState<ShareState>(null);
+  const [showScrollTopButton, setShowScrollTopButton] = useState(false);
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const drawerRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -367,6 +369,16 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  useEffect(() => {
+    const toggleScrollTopButton = () => {
+      setShowScrollTopButton(window.scrollY > 700);
+    };
+
+    toggleScrollTopButton();
+    window.addEventListener("scroll", toggleScrollTopButton, { passive: true });
+    return () => window.removeEventListener("scroll", toggleScrollTopButton);
+  }, []);
+
   const trimmedQuery = deferredQuery.trim().toLowerCase();
 
   const filteredItems = useMemo(() => {
@@ -386,11 +398,11 @@ export default function App() {
   }, [browseMode, trimmedQuery]);
 
   const movieItems = useMemo(
-    () => filteredItems.filter((item) => item.type === "Movie").slice(0, 30),
+    () => filteredItems.filter((item) => item.type === "Movie").slice(0, 17),
     [filteredItems]
   );
   const seriesItems = useMemo(
-    () => filteredItems.filter((item) => item.type === "TvSeries").slice(0, 30),
+    () => filteredItems.filter((item) => item.type === "TvSeries").slice(0, 17),
     [filteredItems]
   );
 
@@ -487,6 +499,66 @@ export default function App() {
       "button, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
     );
     focusTarget?.focus();
+  }, [isDrawerOpen]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    if (!isDrawerOpen) {
+      return;
+    }
+
+    const { body } = document;
+    const scrollY = window.scrollY;
+    const previousPosition = body.style.position;
+    const previousTop = body.style.top;
+    const previousLeft = body.style.left;
+    const previousRight = body.style.right;
+    const previousWidth = body.style.width;
+    const previousOverflow = body.style.overflow;
+
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+
+    return () => {
+      body.style.position = previousPosition;
+      body.style.top = previousTop;
+      body.style.left = previousLeft;
+      body.style.right = previousRight;
+      body.style.width = previousWidth;
+      body.style.overflow = previousOverflow;
+      window.scrollTo({ top: scrollY, left: 0, behavior: "auto" });
+    };
+  }, [isDrawerOpen]);
+
+  useEffect(() => {
+    if (!isSortMenuOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsSortMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isSortMenuOpen]);
+
+  useEffect(() => {
+    if (!isDrawerOpen) {
+      return;
+    }
+
+    setIsSortMenuOpen(false);
   }, [isDrawerOpen]);
 
   useEffect(() => {
@@ -616,6 +688,10 @@ export default function App() {
     setBrowseMode("home");
   };
 
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  };
+
   const shareTitle = async (item: CatalogItem) => {
     const shareUrl = new URL(window.location.href);
     shareUrl.searchParams.set("title", item.imdbCode);
@@ -718,6 +794,19 @@ export default function App() {
         </div>
       </section>
 
+      <div className="mobile-sticky-controls">
+        {searchControl}
+        <button
+          type="button"
+          className="mobile-sort-trigger"
+          aria-label="باز کردن مرتب‌سازی"
+          aria-expanded={isSortMenuOpen}
+          onClick={() => setIsSortMenuOpen(true)}
+        >
+          ☰
+        </button>
+      </div>
+
       {error ? (
         <section className="feedback-panel error-panel glass-panel">
           <p className="section-kicker">خطا</p>
@@ -746,9 +835,11 @@ export default function App() {
                   </h2>
                 </div>
                 {!isSearchMode ? (
-                  <button type="button" className="chip" onClick={backToHome}>
-                    بازگشت به صفحه اصلی
-                  </button>
+                  <div className="browse-header-actions">
+                    <button type="button" className="chip" onClick={backToHome}>
+                      بازگشت به صفحه اصلی
+                    </button>
+                  </div>
                 ) : null}
               </section>
 
@@ -787,7 +878,7 @@ export default function App() {
             </>
           ) : (
             <>
-              <section className="section-header browse-header">
+              <section className="section-header browse-header vitrin-header">
                 <div>
                   <h2>فیلم‌ها</h2>
                 </div>
@@ -798,7 +889,7 @@ export default function App() {
 
               <RowCards items={movieItems} onOpen={openItem} />
 
-              <section className="section-header browse-header">
+              <section className="section-header browse-header vitrin-header">
                 <div>
                   <h2>سریال‌ها</h2>
                 </div>
@@ -946,6 +1037,74 @@ export default function App() {
             </div>
           )}
         </aside>
+      </div>
+
+      {!isDrawerOpen && showScrollTopButton ? (
+        <button type="button" className="scroll-top-fab" onClick={scrollToTop} aria-label="بازگشت به بالای صفحه">
+          ↑
+        </button>
+      ) : null}
+
+      <div className={isSortMenuOpen ? "mobile-sort-sheet open" : "mobile-sort-sheet"}>
+        <button
+          type="button"
+          className="mobile-sort-backdrop"
+          aria-label="بستن منوی مرتب‌سازی"
+          onClick={() => setIsSortMenuOpen(false)}
+        />
+        <section className="mobile-sort-panel" aria-hidden={!isSortMenuOpen} aria-label="تنظیمات مرتب‌سازی">
+          <header className="mobile-sort-header">
+            <h3>مرتب‌سازی</h3>
+            <button type="button" className="mobile-sort-close" onClick={() => setIsSortMenuOpen(false)}>
+              بستن
+            </button>
+          </header>
+
+          <div className="mobile-sort-group">
+            <span className="sort-title">مرتب سازی بر اساس</span>
+            <div className="chip-row">
+              {SORT_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={sort === option.value ? "chip active" : "chip"}
+                  onClick={() => {
+                    applySort(option.value);
+                    setIsSortMenuOpen(false);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mobile-sort-group">
+            <span className="sort-title">جهت مرتب‌سازی</span>
+            <div className="chip-row">
+              <button
+                type="button"
+                className={order === "desc" ? "chip active" : "chip"}
+                onClick={() => {
+                  applyOrder("desc");
+                  setIsSortMenuOpen(false);
+                }}
+              >
+                نزولی
+              </button>
+              <button
+                type="button"
+                className={order === "asc" ? "chip active" : "chip"}
+                onClick={() => {
+                  applyOrder("asc");
+                  setIsSortMenuOpen(false);
+                }}
+              >
+                صعودی
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );
