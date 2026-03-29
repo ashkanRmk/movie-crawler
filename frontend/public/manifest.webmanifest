@@ -1,7 +1,7 @@
 {
-  "name": "VOD Catalog",
-  "short_name": "VOD Catalog",
-  "description": "Browse the catalog, filter instantly, and reopen the archive like an installed app.",
+  "name": "سکانس",
+  "short_name": "سکانس",
+  "description": "سکانس؛ مرور فیلم و سریال با جستجو و نمایش دسته‌بندی‌شده.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

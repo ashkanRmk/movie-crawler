@@ -1,18 +1,12 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCatalog, reloadCatalog } from "./api";
-import type { CatalogItem, CatalogResponse, TitleType } from "./types";
+import { type MouseEvent as ReactMouseEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { fetchCatalog } from "./api";
+import type { CatalogItem, TitleType } from "./types";
 import "./styles.css";
-
-const TYPE_OPTIONS = [
-  { label: "All", value: "all" },
-  { label: "Movies", value: "movie" },
-  { label: "TV Series", value: "tvSeries" }
-] as const;
 
 const SORT_OPTIONS = [
   { label: "IMDb", value: "rate" },
-  { label: "Votes", value: "votes" },
-  { label: "Year", value: "date" }
+  { label: "تعداد رای", value: "votes" },
+  { label: "سال", value: "date" }
 ] as const;
 
 const ART_STYLES = [
@@ -24,10 +18,9 @@ const ART_STYLES = [
   ["#ff9270", "#fdcd5a", "#28140d"]
 ];
 
-type FilterType = (typeof TYPE_OPTIONS)[number]["value"];
 type SortKey = (typeof SORT_OPTIONS)[number]["value"];
-type DubbedFilter = "all" | "dubbed";
-type SyncState = "idle" | "loading" | "reloading" | "error";
+type SyncState = "idle" | "loading" | "error";
+type BrowseMode = "home" | "movie" | "tvSeries";
 type ShareState =
   | { tone: "success"; message: string }
   | { tone: "error"; message: string }
@@ -52,37 +45,34 @@ function getArtwork(item: CatalogItem) {
 }
 
 function formatType(type: TitleType): string {
-  return type === "Movie" ? "Movie" : "TV Series";
+  return type === "Movie" ? "فیلم" : "سریال";
+}
+
+function localizeDynamicLabel(value: string): string {
+  return value
+    .replace(/soft[\s-]?sub/gi, "زیرنویس چسبیده")
+    .replace(/dubbed/gi, "نسخه دوبله شده");
 }
 
 function CardBadges({ item }: { item: CatalogItem }) {
   return (
     <div className="card-art-badges">
       <span className="card-art-badge">{formatType(item.type)}</span>
-      {item.isDubbed ? <span className="card-art-badge dubbed">Dubbed</span> : null}
-    </div>
-  );
-}
-
-function FeaturedBadges({ item }: { item: CatalogItem }) {
-  return (
-    <div className="featured-badges">
-      <span className="featured-badge">{formatType(item.type)}</span>
-      {item.isDubbed ? <span className="featured-badge dubbed">Dubbed</span> : null}
+      {item.isDubbed ? <span className="card-art-badge dubbed">نسخه دوبله شده</span> : null}
     </div>
   );
 }
 
 function formatCompactVotes(votes: number): string {
   if (votes >= 1_000_000) {
-    return `${(votes / 1_000_000).toFixed(1)}M votes`;
+    return `${(votes / 1_000_000).toFixed(1)} میلیون رای`;
   }
 
   if (votes >= 1_000) {
-    return `${(votes / 1_000).toFixed(0)}K votes`;
+    return `${(votes / 1_000).toFixed(0)} هزار رای`;
   }
 
-  return `${votes} votes`;
+  return `${votes.toLocaleString("fa-IR")} رای`;
 }
 
 function sortItems(items: CatalogItem[], sort: SortKey, order: "asc" | "desc") {
@@ -114,18 +104,6 @@ const ImdbIcon = () => (
   </svg>
 );
 
-const MenuIcon = () => (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path
-      d="M4 7h16M4 12h16M4 17h16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-    />
-  </svg>
-);
-
 function SkeletonCards() {
   return (
     <section className="browse-grid" aria-hidden="true">
@@ -141,6 +119,201 @@ function SkeletonCards() {
   );
 }
 
+function RowCards({ items, onOpen }: { items: CatalogItem[]; onOpen: (itemId: string) => void }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<{
+    active: boolean;
+    startX: number;
+    startScrollLeft: number;
+    moved: boolean;
+    lastX: number;
+    lastTime: number;
+    velocity: number;
+  }>({
+    active: false,
+    startX: 0,
+    startScrollLeft: 0,
+    moved: false,
+    lastX: 0,
+    lastTime: 0,
+    velocity: 0
+  });
+  const suppressClickRef = useRef(false);
+  const inertiaRafRef = useRef<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const stopInertia = () => {
+    if (inertiaRafRef.current === null) {
+      return;
+    }
+
+    cancelAnimationFrame(inertiaRafRef.current);
+    inertiaRafRef.current = null;
+  };
+
+  const startInertia = () => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    let velocity = dragStateRef.current.velocity;
+    if (Math.abs(velocity) < 0.02) {
+      return;
+    }
+
+    const step = () => {
+      const node = containerRef.current;
+      if (!node) {
+        inertiaRafRef.current = null;
+        return;
+      }
+
+      node.scrollLeft -= velocity * 16;
+      velocity *= 0.92;
+
+      if (Math.abs(velocity) < 0.02) {
+        inertiaRafRef.current = null;
+        return;
+      }
+
+      inertiaRafRef.current = requestAnimationFrame(step);
+    };
+
+    inertiaRafRef.current = requestAnimationFrame(step);
+  };
+
+  useEffect(() => {
+    return () => {
+      stopInertia();
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  const handleMouseMove = (event: MouseEvent) => {
+    const container = containerRef.current;
+    if (!container || !dragStateRef.current.active) {
+      return;
+    }
+
+    const now = performance.now();
+    const deltaFromLast = event.clientX - dragStateRef.current.lastX;
+    const dt = now - dragStateRef.current.lastTime;
+    if (dt > 0) {
+      dragStateRef.current.velocity = deltaFromLast / dt;
+    }
+    dragStateRef.current.lastX = event.clientX;
+    dragStateRef.current.lastTime = now;
+
+    const deltaX = event.clientX - dragStateRef.current.startX;
+    if (Math.abs(deltaX) > 6) {
+      dragStateRef.current.moved = true;
+      if (!isDragging) {
+        setIsDragging(true);
+      }
+    }
+
+    container.scrollLeft = dragStateRef.current.startScrollLeft - deltaX;
+    event.preventDefault();
+  };
+
+  const handleMouseUp = () => {
+    if (!dragStateRef.current.active) {
+      return;
+    }
+
+    dragStateRef.current.active = false;
+    window.removeEventListener("mousemove", handleMouseMove);
+    window.removeEventListener("mouseup", handleMouseUp);
+
+    suppressClickRef.current = dragStateRef.current.moved;
+    setIsDragging(false);
+    if (dragStateRef.current.moved) {
+      startInertia();
+    }
+    dragStateRef.current.moved = false;
+  };
+
+  const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    stopInertia();
+
+    const now = performance.now();
+    dragStateRef.current = {
+      active: true,
+      startX: event.clientX,
+      startScrollLeft: container.scrollLeft,
+      moved: false,
+      lastX: event.clientX,
+      lastTime: now,
+      velocity: 0
+    };
+
+    window.addEventListener("mousemove", handleMouseMove, { passive: false });
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!suppressClickRef.current) {
+      return;
+    }
+
+    suppressClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className={isDragging ? "category-scroll dragging" : "category-scroll"}
+      role="list"
+      onMouseDown={handleMouseDown}
+      onClickCapture={handleClickCapture}
+    >
+      {items.map((item) => {
+        const artwork = getArtwork(item);
+
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className="catalog-card row-card"
+            onClick={() => onOpen(item.id)}
+            role="listitem"
+          >
+            <div className="card-art" style={{ background: artwork.background }}>
+              <div className="card-art-noise" />
+              <span className="card-art-initials">{artwork.initials}</span>
+              <CardBadges item={item} />
+            </div>
+
+            <div className="catalog-copy">
+              <div className="catalog-topline">
+                <h3>{item.title}</h3>
+                <span className="catalog-rate">IMDb {item.imdbRate.toFixed(1)}</span>
+              </div>
+              <p className="catalog-meta">
+                <span>{item.year ?? "نامشخص"}</span>
+                <span>{formatCompactVotes(item.imdbVotes)}</span>
+              </p>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function App() {
   const readRequestedTitle = () => {
     if (typeof window === "undefined") {
@@ -151,49 +324,38 @@ export default function App() {
   };
 
   const [items, setItems] = useState<CatalogItem[]>([]);
-  const [meta, setMeta] = useState<CatalogResponse["meta"] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<SyncState>("loading");
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
-  const [typeFilter, setTypeFilter] = useState<FilterType>("all");
-  const [dubbedFilter, setDubbedFilter] = useState<DubbedFilter>("all");
   const [sort, setSort] = useState<SortKey>("rate");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
+  const [browseMode, setBrowseMode] = useState<BrowseMode>("home");
+  const [categoryRenderedCount, setCategoryRenderedCount] = useState(20);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
-  const [batchSize, setBatchSize] = useState(18);
-  const [renderedCount, setRenderedCount] = useState(18);
   const [pendingSharedTitle, setPendingSharedTitle] = useState<string | null>(() => readRequestedTitle());
   const [shareState, setShareState] = useState<ShareState>(null);
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-  const trackedSharedOpensRef = useRef<Set<string>>(new Set());
-  const mobileFilterRef = useRef<HTMLElement | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  const loadCatalog = async (mode: "initial" | "reload") => {
+  const loadCatalog = async () => {
     setError(null);
-    setSyncState(mode === "initial" ? "loading" : "reloading");
+    setSyncState("loading");
 
     try {
-      if (mode === "reload") {
-        await reloadCatalog();
-      }
-
       const response = await fetchCatalog({});
       setItems(response.items);
-      setMeta(response.meta);
       setSyncState("idle");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Catalog load failed");
+      setError(err instanceof Error ? err.message : "دریافت فهرست با خطا مواجه شد");
       setSyncState("error");
     }
   };
 
   useEffect(() => {
-    void loadCatalog("initial");
+    void loadCatalog();
   }, []);
 
   useEffect(() => {
@@ -205,52 +367,104 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  const trimmedQuery = deferredQuery.trim().toLowerCase();
+
   const filteredItems = useMemo(() => {
     let next = [...items];
-    const trimmed = deferredQuery.trim().toLowerCase();
 
-    if (trimmed) {
-      next = next.filter((item) => item.title.toLowerCase().includes(trimmed));
-    }
-
-    if (typeFilter !== "all") {
-      next = next.filter((item) => {
-        if (typeFilter === "movie") {
-          return item.type === "Movie";
-        }
-
-        return item.type === "TvSeries";
-      });
-    }
-
-    if (dubbedFilter === "dubbed") {
-      next = next.filter((item) => item.isDubbed);
+    if (trimmedQuery) {
+      next = next.filter((item) => item.title.toLowerCase().includes(trimmedQuery));
     }
 
     return sortItems(next, sort, order);
-  }, [deferredQuery, dubbedFilter, items, order, sort, typeFilter]);
+  }, [items, order, sort, trimmedQuery]);
 
-  const featuredItems = useMemo(() => filteredItems.slice(0, 3), [filteredItems]);
-  const browseItems = useMemo(() => filteredItems.slice(3), [filteredItems]);
-  const renderedItems = useMemo(
-    () => browseItems.slice(0, renderedCount),
-    [browseItems, renderedCount]
+  useEffect(() => {
+    if (trimmedQuery && browseMode !== "home") {
+      setBrowseMode("home");
+    }
+  }, [browseMode, trimmedQuery]);
+
+  const movieItems = useMemo(
+    () => filteredItems.filter((item) => item.type === "Movie").slice(0, 30),
+    [filteredItems]
   );
+  const seriesItems = useMemo(
+    () => filteredItems.filter((item) => item.type === "TvSeries").slice(0, 30),
+    [filteredItems]
+  );
+
+  const categoryItems = useMemo(() => {
+    if (browseMode === "movie") {
+      return filteredItems.filter((item) => item.type === "Movie");
+    }
+
+    if (browseMode === "tvSeries") {
+      return filteredItems.filter((item) => item.type === "TvSeries");
+    }
+
+    return [] as CatalogItem[];
+  }, [browseMode, filteredItems]);
+
+  const isSearchMode = trimmedQuery.length > 0;
+  const showGrid = isSearchMode || browseMode !== "home";
+  const gridItems = isSearchMode ? filteredItems : categoryItems.slice(0, categoryRenderedCount);
+  const canLoadMoreCategory =
+    !isSearchMode && browseMode !== "home" && categoryRenderedCount < categoryItems.length;
+
   const activeItem = useMemo(
     () => items.find((item) => item.id === activeId) ?? null,
     [activeId, items]
   );
-  const navigableItems = useMemo(
-    () => [...featuredItems, ...renderedItems],
-    [featuredItems, renderedItems]
-  );
+
+  const navigableItems = useMemo(() => {
+    if (showGrid) {
+      return gridItems;
+    }
+
+    return [...movieItems, ...seriesItems];
+  }, [gridItems, movieItems, seriesItems, showGrid]);
 
   useEffect(() => {
-    setRenderedCount((prev) => {
-      const desired = Math.max(batchSize, prev);
-      return Math.min(desired, browseItems.length || batchSize);
-    });
-  }, [batchSize, browseItems.length]);
+    if (browseMode === "home" || isSearchMode) {
+      return;
+    }
+
+    setCategoryRenderedCount(20);
+  }, [browseMode, isSearchMode]);
+
+  useEffect(() => {
+    if (isSearchMode || browseMode === "home") {
+      return;
+    }
+
+    setCategoryRenderedCount((prev) => Math.min(Math.max(20, prev), categoryItems.length || 20));
+  }, [browseMode, categoryItems.length, isSearchMode]);
+
+  useEffect(() => {
+    if (!canLoadMoreCategory) {
+      return;
+    }
+
+    const node = loadMoreRef.current;
+    if (!node) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setCategoryRenderedCount((prev) => Math.min(prev + 20, categoryItems.length));
+          }
+        });
+      },
+      { rootMargin: "320px" }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [canLoadMoreCategory, categoryItems.length]);
 
   useEffect(() => {
     if (activeId && !filteredItems.some((item) => item.id === activeId)) {
@@ -274,17 +488,6 @@ export default function App() {
     );
     focusTarget?.focus();
   }, [isDrawerOpen]);
-
-  useEffect(() => {
-    if (!isMobileFilterOpen) {
-      return;
-    }
-
-    const focusTarget = mobileFilterRef.current?.querySelector<HTMLElement>(
-      "button, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
-    );
-    focusTarget?.focus();
-  }, [isMobileFilterOpen]);
 
   useEffect(() => {
     setShareState(null);
@@ -325,24 +528,17 @@ export default function App() {
 
     setActiveId(matchedItem.id);
     setIsDrawerOpen(true);
-
-    trackedSharedOpensRef.current.add(pendingSharedTitle);
   }, [items, pendingSharedTitle]);
 
   useEffect(() => {
-    if (!isDrawerOpen && !isMobileFilterOpen) {
+    if (!isDrawerOpen) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (isDrawerOpen) {
-          closeDrawer();
-          return;
-        }
-
-        closeMobileFilters();
+        closeDrawer();
         return;
       }
 
@@ -391,31 +587,9 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeId, isDrawerOpen, isMobileFilterOpen, navigableItems]);
-
-  useEffect(() => {
-    const node = loadMoreRef.current;
-    if (!node || renderedCount >= browseItems.length) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            setRenderedCount((prev) => Math.min(prev + batchSize, browseItems.length));
-          }
-        });
-      },
-      { rootMargin: "320px" }
-    );
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [batchSize, browseItems.length, renderedCount]);
+  }, [activeId, isDrawerOpen, navigableItems]);
 
   const openItem = (itemId: string) => {
-    setIsMobileFilterOpen(false);
     setActiveId(itemId);
     setIsDrawerOpen(true);
   };
@@ -426,42 +600,20 @@ export default function App() {
     setPendingSharedTitle(null);
   };
 
-  const closeMobileFilters = () => {
-    setIsMobileFilterOpen(false);
-  };
-
-  const toggleMobileFilters = () => {
-    setIsMobileFilterOpen((prev) => !prev);
-  };
-
-  const applyTypeFilter = (value: FilterType) => {
-    setTypeFilter(value);
-    closeMobileFilters();
-  };
-
-  const applyDubbedFilter = (value: DubbedFilter) => {
-    setDubbedFilter(value);
-    closeMobileFilters();
-  };
-
   const applySort = (value: SortKey) => {
     setSort(value);
-    closeMobileFilters();
   };
 
-  const toggleOrder = () => {
-    setOrder((current) => (current === "desc" ? "asc" : "desc"));
-    closeMobileFilters();
+  const applyOrder = (value: "asc" | "desc") => {
+    setOrder(value);
   };
 
-  const applyBatchSize = (size: number) => {
-    setBatchSize(size);
-    closeMobileFilters();
+  const openCategory = (type: "movie" | "tvSeries") => {
+    setBrowseMode(type);
   };
 
-  const reloadFromFilters = () => {
-    closeMobileFilters();
-    void loadCatalog("reload");
+  const backToHome = () => {
+    setBrowseMode("home");
   };
 
   const shareTitle = async (item: CatalogItem) => {
@@ -476,19 +628,19 @@ export default function App() {
       if (method === "web_share") {
         await navigator.share({
           title: item.title,
-          text: `Open ${item.title} in the archive.`,
+          text: `نمایش ${item.title} در سکانس.`,
           url: shareUrl.toString()
         });
-        setShareState({ tone: "success", message: "Shared" });
+        setShareState({ tone: "success", message: "با موفقیت ارسال شد" });
         return;
       }
 
       if (!navigator.clipboard?.writeText) {
-        throw new Error("Clipboard sharing is not available in this browser.");
+        throw new Error("امکان کپی لینک در این مرورگر وجود ندارد.");
       }
 
       await navigator.clipboard.writeText(shareUrl.toString());
-      setShareState({ tone: "success", message: "Link copied" });
+      setShareState({ tone: "success", message: "لینک کپی شد" });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
@@ -496,116 +648,24 @@ export default function App() {
 
       setShareState({
         tone: "error",
-        message: err instanceof Error ? err.message : "Share failed"
+        message: err instanceof Error ? err.message : "اشتراک‌گذاری ناموفق بود"
       });
     }
   };
 
-  const hasNoResults = syncState !== "loading" && filteredItems.length === 0 && !error;
-  const lastSyncLabel = meta ? new Date(meta.fetchedAt).toLocaleString() : "Not synced yet";
-  const appClassName = isDrawerOpen || isMobileFilterOpen ? "app drawer-active" : "app";
+  const hasNoResults = syncState !== "loading" && (showGrid ? gridItems.length === 0 : movieItems.length + seriesItems.length === 0) && !error;
+  const appClassName = isDrawerOpen ? "app drawer-active" : "app";
 
   const searchControl = (
     <label className="hero-search">
-      <span className="sr-only">Search titles</span>
+      <span className="sr-only">جستجو</span>
       <input
         type="search"
-        placeholder="Search title, series, franchise..."
+        placeholder="جستجو در عنوان فیلم یا سریال..."
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
     </label>
-  );
-
-  const filterControls = (
-    <>
-      <div className="filter-block">
-        <span className="filter-label">Type</span>
-        <div className="chip-row">
-          {TYPE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={typeFilter === option.value ? "chip active" : "chip"}
-              onClick={() => applyTypeFilter(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="filter-block">
-        <span className="filter-label">Audio</span>
-        <div className="chip-row">
-          <button
-            type="button"
-            className={dubbedFilter === "all" ? "chip active" : "chip"}
-            onClick={() => applyDubbedFilter("all")}
-          >
-            All
-          </button>
-          <button
-            type="button"
-            className={dubbedFilter === "dubbed" ? "chip active" : "chip"}
-            onClick={() => applyDubbedFilter("dubbed")}
-          >
-            Dubbed
-          </button>
-        </div>
-      </div>
-
-      <div className="filter-block">
-        <span className="filter-label">Sort</span>
-        <div className="chip-row">
-          {SORT_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={sort === option.value ? "chip active" : "chip"}
-              onClick={() => applySort(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="filter-block compact">
-        <span className="filter-label">Direction</span>
-        <button type="button" className="chip" onClick={toggleOrder}>
-          {order === "desc" ? "High to Low" : "Low to High"}
-        </button>
-      </div>
-
-      <div className="filter-block compact">
-        <span className="filter-label">Flow</span>
-        <div className="chip-row">
-          {[18, 30, 48].map((size) => (
-            <button
-              key={size}
-              type="button"
-              className={batchSize === size ? "chip active" : "chip"}
-              onClick={() => applyBatchSize(size)}
-            >
-              {size}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="filter-block compact">
-        <span className="filter-label">Sync</span>
-        <button
-          type="button"
-          className="chip chip-accent"
-          onClick={reloadFromFilters}
-          disabled={syncState === "loading" || syncState === "reloading"}
-        >
-          {syncState === "reloading" ? "Refreshing..." : "Reload source"}
-        </button>
-      </div>
-    </>
   );
 
   return (
@@ -613,224 +673,191 @@ export default function App() {
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
 
-      <section className="mobile-search-bar glass-panel">
-        {searchControl}
-      </section>
-
       <section className="hero glass-panel">
         <div className="hero-copy">
-          <p className="section-kicker">Premium archive</p>
-          <h1>Offline archive.</h1>
+          <h1>🎬 سکانس</h1>
           <p className="hero-text">
-            Explore standout titles, refine the catalog instantly, and open download options in a
-            dedicated side panel without losing your place.
+            دنیای کامل فیلم و سریال، همیشه در دسترس تو
           </p>
-          <div className="hero-search-desktop">{searchControl}</div>
-          <button
-            type="button"
-            className="mobile-filter-trigger"
-            onClick={toggleMobileFilters}
-            aria-expanded={isMobileFilterOpen}
-            aria-controls="mobile-filter-drawer"
-          >
-            <MenuIcon />
-            Filters & sort
-          </button>
+          <div className="hero-controls">
+            {searchControl}
+            <div className="hero-sort-controls">
+              <span className="sort-title">مرتب سازی بر اساس</span>
+              <div className="chip-row sort-chip-row">
+                {SORT_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={sort === option.value ? "chip active" : "chip"}
+                    onClick={() => applySort(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={order === "desc" ? "sort-icon-btn active" : "sort-icon-btn"}
+                  onClick={() => applyOrder("desc")}
+                  aria-label="نزولی"
+                  title="نزولی"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  className={order === "asc" ? "sort-icon-btn active" : "sort-icon-btn"}
+                  onClick={() => applyOrder("asc")}
+                  aria-label="صعودی"
+                  title="صعودی"
+                >
+                  ↑
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <div className="hero-side">
-          <div className="hero-stat">
-            <span className="hero-stat-label">Catalog</span>
-            <strong>{meta?.itemCount ?? items.length}</strong>
-          </div>
-          <div className="hero-stat">
-            <span className="hero-stat-label">Last sync</span>
-            <strong>{lastSyncLabel}</strong>
-          </div>
-          <div className="hero-stat">
-            <span className="hero-stat-label">Status</span>
-            <strong>{syncState === "reloading" ? "Refreshing" : "Ready"}</strong>
-          </div>
-        </div>
-      </section>
-
-      <section className="filter-rail glass-panel">
-        {filterControls}
       </section>
 
       {error ? (
         <section className="feedback-panel error-panel glass-panel">
-          <p className="section-kicker">Source issue</p>
-          <h2>Catalog sync failed.</h2>
+          <p className="section-kicker">خطا</p>
+          <h2>دریافت فهرست انجام نشد</h2>
           <p>{error}</p>
         </section>
       ) : null}
 
-      {syncState === "loading" ? (
-        <>
-          <section className="featured-strip">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div key={index} className="featured-card skeleton-card">
-                <div className="card-art skeleton-block tall" />
-              </div>
-            ))}
-          </section>
-          <SkeletonCards />
-        </>
-      ) : null}
+      {syncState === "loading" ? <SkeletonCards /> : null}
 
       {syncState !== "loading" && !hasNoResults ? (
         <>
-          <section className="section-header">
-            <div>
-              <p className="section-kicker">Featured picks</p>
-              <h2>Featured titles</h2>
-            </div>
-            <p className="section-note">
-              {filteredItems.length} matching titles • {Math.min(renderedCount, browseItems.length)} in
-              browse view
-            </p>
-          </section>
+          {showGrid ? (
+            <>
+              <section className="section-header browse-header">
+                <div>
+                  <p className="section-kicker">
+                    {isSearchMode ? "نتیجه جستجو" : browseMode === "movie" ? "فیلم‌ها" : "سریال‌ها"}
+                  </p>
+                  <h2>
+                    {isSearchMode
+                      ? `${gridItems.length.toLocaleString("fa-IR")} نتیجه`
+                      : browseMode === "movie"
+                        ? "همه فیلم‌ها"
+                        : "همه سریال‌ها"}
+                  </h2>
+                </div>
+                {!isSearchMode ? (
+                  <button type="button" className="chip" onClick={backToHome}>
+                    بازگشت به صفحه اصلی
+                  </button>
+                ) : null}
+              </section>
 
-          <section className="featured-strip">
-            {featuredItems.map((item, index) => {
-              const artwork = getArtwork(item);
+              <section className="browse-grid">
+                {gridItems.map((item) => {
+                  const artwork = getArtwork(item);
 
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={index === 0 ? "featured-card featured-card-large" : "featured-card"}
-                  style={{ background: artwork.background }}
-                  onClick={() => openItem(item.id)}
-                >
-                  <div className="featured-overlay" />
-                  <div className="featured-topline">
-                    <FeaturedBadges item={item} />
-                    <span>IMDb {item.imdbRate.toFixed(1)}</span>
-                  </div>
-                  <div className="featured-copy">
-                    <span className="featured-initials">{artwork.initials}</span>
-                    <h3>{item.title}</h3>
-                    <p>{item.year ?? "Unknown year"} • {formatCompactVotes(item.imdbVotes)}</p>
-                  </div>
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="catalog-card"
+                      onClick={() => openItem(item.id)}
+                    >
+                      <div className="card-art" style={{ background: artwork.background }}>
+                        <div className="card-art-noise" />
+                        <span className="card-art-initials">{artwork.initials}</span>
+                        <CardBadges item={item} />
+                      </div>
+
+                      <div className="catalog-copy">
+                        <div className="catalog-topline">
+                          <h3>{item.title}</h3>
+                          <span className="catalog-rate">IMDb {item.imdbRate.toFixed(1)}</span>
+                        </div>
+                        <p className="catalog-meta">
+                          <span>{item.year ?? "نامشخص"}</span>
+                          <span>{formatCompactVotes(item.imdbVotes)}</span>
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </section>
+              {canLoadMoreCategory ? <div ref={loadMoreRef} className="infinite-sentinel" /> : null}
+            </>
+          ) : (
+            <>
+              <section className="section-header browse-header">
+                <div>
+                  <h2>فیلم‌ها</h2>
+                </div>
+                <button type="button" className="chip" onClick={() => openCategory("movie")}>
+                  نمایش همه
                 </button>
-              );
-            })}
-          </section>
+              </section>
 
-          <section className="section-header browse-header">
-            <div>
-              <p className="section-kicker">Browse wall</p>
-              <h2>Continuous catalog browsing</h2>
-            </div>
-            <p className="section-note">Auto-loads as you scroll. Opening a title keeps the wall in place.</p>
-          </section>
+              <RowCards items={movieItems} onOpen={openItem} />
 
-          <section className="browse-grid">
-            {renderedItems.map((item) => {
-              const artwork = getArtwork(item);
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="catalog-card"
-                  onClick={() => openItem(item.id)}
-                >
-                  <div className="card-art" style={{ background: artwork.background }}>
-                    <div className="card-art-noise" />
-                    <span className="card-art-initials">{artwork.initials}</span>
-                    <CardBadges item={item} />
-                  </div>
-
-                  <div className="catalog-copy">
-                    <div className="catalog-topline">
-                      <h3>{item.title}</h3>
-                      <span className="catalog-rate">IMDb {item.imdbRate.toFixed(1)}</span>
-                    </div>
-                    <p className="catalog-meta">
-                      <span>{item.year ?? "Unknown year"}</span>
-                      <span>{formatCompactVotes(item.imdbVotes)}</span>
-                    </p>
-                  </div>
+              <section className="section-header browse-header">
+                <div>
+                  <h2>سریال‌ها</h2>
+                </div>
+                <button type="button" className="chip" onClick={() => openCategory("tvSeries")}>
+                  نمایش همه
                 </button>
-              );
-            })}
-          </section>
+              </section>
 
-          <section className="footer-bar glass-panel">
-            <span>{Math.min(renderedCount, browseItems.length)} of {browseItems.length} browse titles visible</span>
-            <span>{meta ? `Synced ${new Date(meta.fetchedAt).toLocaleString()}` : "Waiting for source"}</span>
-          </section>
-          <div ref={loadMoreRef} className="infinite-sentinel" />
+              <RowCards items={seriesItems} onOpen={openItem} />
+            </>
+          )}
         </>
       ) : null}
 
       {hasNoResults ? (
         <section className="feedback-panel empty-panel glass-panel">
-          <p className="section-kicker">No match</p>
-          <h2>Nothing fits the current filters.</h2>
-          <p>Try a broader search, switch type, or change the sort focus.</p>
+          <p className="section-kicker">نتیجه‌ای پیدا نشد</p>
+          <h2>چیزی مطابق جستجو یا فیلتر فعلی نیست</h2>
+          <p>عبارت جستجو یا ترتیب مرتب‌سازی را تغییر دهید.</p>
         </section>
       ) : null}
-
-      <div className={isMobileFilterOpen ? "mobile-filter-shell open" : "mobile-filter-shell"}>
-        <button
-          type="button"
-          className="drawer-backdrop"
-          aria-label="Close filter panel"
-          onClick={closeMobileFilters}
-        />
-        <aside
-          id="mobile-filter-drawer"
-          ref={mobileFilterRef}
-          className="mobile-filter-drawer glass-panel"
-          aria-hidden={!isMobileFilterOpen}
-          aria-label="Catalog filters"
-        >
-          <div className="mobile-filter-header">
-            <div>
-              <p className="section-kicker">Browse controls</p>
-              <h2>Filters & sort</h2>
-            </div>
-            <button type="button" className="drawer-close" onClick={closeMobileFilters}>
-              Close
-            </button>
-          </div>
-          <div className="mobile-filter-body">
-            {filterControls}
-          </div>
-        </aside>
-      </div>
 
       <div className={isDrawerOpen ? "drawer-shell open" : "drawer-shell"}>
         <button
           type="button"
           className="drawer-backdrop"
-          aria-label="Close detail panel"
+          aria-label="بستن پنل جزئیات"
           onClick={closeDrawer}
         />
         <aside
           ref={drawerRef}
           className="detail-drawer glass-panel"
           aria-hidden={!isDrawerOpen}
-          aria-label="Title details"
+          aria-label="جزئیات عنوان"
         >
           {activeItem ? (
             <>
               <div className="drawer-hero" style={{ background: getArtwork(activeItem).background }}>
                 <div className="drawer-hero-overlay" />
                 <button type="button" className="drawer-close" onClick={closeDrawer}>
-                  Close
+                  بستن
                 </button>
                 <div className="drawer-hero-copy">
                   <span className="section-kicker">{formatType(activeItem.type)}</span>
                   <h2>{activeItem.title}</h2>
-                  <p>
-                    {activeItem.year ?? "Unknown year"} • IMDb {activeItem.imdbRate.toFixed(1)} •{" "}
-                    {activeItem.imdbVotes.toLocaleString()} votes
-                  </p>
+                  <div className="drawer-meta-grid">
+                    <div className="drawer-meta-item">
+                      <span>سال ساخت</span>
+                      <strong>{activeItem.year ?? "نامشخص"}</strong>
+                    </div>
+                    <div className="drawer-meta-item">
+                      <span>تعداد رای</span>
+                      <strong>{activeItem.imdbVotes.toLocaleString("fa-IR")}</strong>
+                    </div>
+                    <div className="drawer-meta-item">
+                      <span>امتیاز IMDb</span>
+                      <strong>{activeItem.imdbRate.toFixed(1)}</strong>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -841,7 +868,7 @@ export default function App() {
                     className="drawer-share-button"
                     onClick={() => void shareTitle(activeItem)}
                   >
-                    Share title
+                    اشتراک‌گذاری عنوان
                   </button>
                   <a
                     className="imdb-link"
@@ -850,7 +877,7 @@ export default function App() {
                     rel="noreferrer"
                   >
                     <ImdbIcon />
-                    Open on IMDb
+                    مشاهده در IMDb
                   </a>
                 </div>
                 {shareState ? (
@@ -864,14 +891,14 @@ export default function App() {
                     {activeItem.downloads.map((group) => (
                       <section key={group.label} className="download-panel">
                         <header className="download-heading">
-                          <h3>{group.label}</h3>
-                          <span>{group.links.length} options</span>
+                          <h3>{localizeDynamicLabel(group.label)}</h3>
+                          <span>{group.links.length.toLocaleString("fa-IR")} گزینه</span>
                         </header>
                         <div className="download-grid">
                           {group.links.map((link) => (
-                            <a key={link.url} href={link.url} className="download-link">
-                              <span>{link.label}</span>
-                              <strong>{link.size ?? "Open"}</strong>
+                            <a key={link.url} href={link.url} className="download-link" target="_blank" rel="noreferrer">
+                              <span>{localizeDynamicLabel(link.label)}</span>
+                              <strong>{link.size ?? "باز کردن"}</strong>
                             </a>
                           ))}
                         </div>
@@ -883,18 +910,22 @@ export default function App() {
                     {activeItem.seasons.map((season) => (
                       <section key={season.seasonNumber} className="download-panel">
                         <header className="download-heading">
-                          <h3>Season {season.seasonNumber}</h3>
-                          <span>{season.groups.reduce((sum, group) => sum + group.links.length, 0)} links</span>
+                          <h3>فصل {season.seasonNumber.toLocaleString("fa-IR")}</h3>
+                          <span>
+                            {season.groups
+                              .reduce((sum, group) => sum + group.links.length, 0)
+                              .toLocaleString("fa-IR")} لینک
+                          </span>
                         </header>
                         <div className="season-stack">
                           {season.groups.map((group) => (
                             <div key={group.label} className="season-group">
-                              <span className="season-label">{group.label}</span>
+                              <span className="season-label">{localizeDynamicLabel(group.label)}</span>
                               <div className="download-grid">
                                 {group.links.map((link) => (
-                                  <a key={link.url} href={link.url} className="download-link">
-                                    <span>{link.label}</span>
-                                    <strong>{link.size ?? "Open"}</strong>
+                                  <a key={link.url} href={link.url} className="download-link" target="_blank" rel="noreferrer">
+                                    <span>{localizeDynamicLabel(link.label)}</span>
+                                    <strong>{link.size ?? "باز کردن"}</strong>
                                   </a>
                                 ))}
                               </div>
@@ -909,9 +940,9 @@ export default function App() {
             </>
           ) : (
             <div className="drawer-empty">
-              <p className="section-kicker">Detail panel</p>
-              <h2>Select a title</h2>
-              <p>Open any card to inspect IMDb details and jump to the available downloads.</p>
+              <p className="section-kicker">پنل جزئیات</p>
+              <h2>یک عنوان را انتخاب کنید</h2>
+              <p>برای نمایش لینک‌ها و جزئیات IMDb روی یکی از کارت‌ها بزنید.</p>
             </div>
           )}
         </aside>
