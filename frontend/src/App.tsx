@@ -252,11 +252,43 @@ function withoutDirectoryLinksInSeasonGroups(seasons: SeasonGroup[]): SeasonGrou
 }
 
 async function copyTextToClipboard(value: string): Promise<void> {
-  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-    throw new Error("امکان کپی لینک در این مرورگر وجود ندارد.");
+  const text = value.trim();
+  if (!text) {
+    throw new Error("متنی برای کپی وجود ندارد.");
   }
 
-  await navigator.clipboard.writeText(value);
+  if (
+    typeof navigator !== "undefined" &&
+    typeof window !== "undefined" &&
+    window.isSecureContext &&
+    navigator.clipboard?.writeText
+  ) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  if (typeof document !== "undefined") {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.setAttribute("readonly", "");
+    textArea.style.position = "fixed";
+    textArea.style.top = "-9999px";
+    textArea.style.left = "-9999px";
+
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    textArea.setSelectionRange(0, textArea.value.length);
+
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textArea);
+
+    if (copied) {
+      return;
+    }
+  }
+
+  throw new Error("امکان کپی لینک در این مرورگر وجود ندارد.");
 }
 
 function chunkArray<T>(items: T[], chunkSize: number): T[][] {
