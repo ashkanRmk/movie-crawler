@@ -328,6 +328,7 @@ export default function App() {
   const deferredQuery = useDeferredValue(query);
   const [sort, setSort] = useState<SortKey>("rate");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
+  const [dubbedOnly, setDubbedOnly] = useState(false);
   const [browseMode, setBrowseMode] = useState<BrowseMode>("home");
   const [categoryRenderedCount, setCategoryRenderedCount] = useState(20);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -386,8 +387,12 @@ export default function App() {
       next = next.filter((item) => item.title.toLowerCase().includes(trimmedQuery));
     }
 
+    if (dubbedOnly) {
+      next = next.filter((item) => item.isDubbed);
+    }
+
     return sortItems(next, sort, order);
-  }, [items, order, sort, trimmedQuery]);
+  }, [dubbedOnly, items, order, sort, trimmedQuery]);
 
   useEffect(() => {
     if (trimmedQuery && browseMode !== "home") {
@@ -770,6 +775,13 @@ export default function App() {
                 ))}
                 <button
                   type="button"
+                  className={dubbedOnly ? "chip active" : "chip"}
+                  onClick={() => setDubbedOnly((prev) => !prev)}
+                >
+                  فقط دوبله شده
+                </button>
+                <button
+                  type="button"
                   className={order === "desc" ? "sort-icon-btn active" : "sort-icon-btn"}
                   onClick={() => applyOrder("desc")}
                   aria-label="نزولی"
@@ -1069,6 +1081,16 @@ export default function App() {
                   {option.label}
                 </button>
               ))}
+              <button
+                type="button"
+                className={dubbedOnly ? "chip active" : "chip"}
+                onClick={() => {
+                  setDubbedOnly((prev) => !prev);
+                  setIsSortMenuOpen(false);
+                }}
+              >
+                فقط دوبله شده
+              </button>
             </div>
           </div>
 
@@ -1097,6 +1119,7 @@ export default function App() {
               </button>
             </div>
           </div>
+
         </section>
       </div>
     </div>
