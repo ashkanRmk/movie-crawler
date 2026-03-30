@@ -389,6 +389,21 @@ button {
   z-index: 1;
 }
 
+.card-imdb-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #ffd56d;
+  backdrop-filter: blur(4px);
+}
+
 .card-art-initials {
   align-self: flex-start;
   font-size: clamp(2rem, 3vw, 2.8rem);
@@ -422,25 +437,16 @@ button {
   gap: 8px;
 }
 
-.catalog-topline {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.catalog-topline h3 {
+.catalog-title {
   margin: 0;
   font-size: 1rem;
   line-height: 1.4;
-  text-align: right;
-}
-
-.catalog-rate {
-  flex-shrink: 0;
-  color: var(--accent-2);
-  font-size: 12px;
-  font-weight: 700;
+  direction: ltr;
+  unicode-bidi: plaintext;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .catalog-meta {

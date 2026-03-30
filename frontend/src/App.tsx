@@ -293,15 +293,13 @@ function RowCards({ items, onOpen }: { items: CatalogItem[]; onOpen: (itemId: st
           >
             <div className="card-art" style={{ background: artwork.background }}>
               <div className="card-art-noise" />
+              <span className="card-imdb-badge">IMDb {item.imdbRate.toFixed(1)}</span>
               <span className="card-art-initials">{artwork.initials}</span>
               <CardBadges item={item} />
             </div>
 
             <div className="catalog-copy">
-              <div className="catalog-topline">
-                <h3>{item.title}</h3>
-                <span className="catalog-rate">IMDb {item.imdbRate.toFixed(1)}</span>
-              </div>
+              <h3 className="catalog-title" title={item.title}>{item.title}</h3>
               <p className="catalog-meta">
                 <span>{item.year ?? "نامشخص"}</span>
                 <span>{formatCompactVotes(item.imdbVotes)}</span>
@@ -853,15 +851,13 @@ export default function App() {
                     >
                       <div className="card-art" style={{ background: artwork.background }}>
                         <div className="card-art-noise" />
+                        <span className="card-imdb-badge">IMDb {item.imdbRate.toFixed(1)}</span>
                         <span className="card-art-initials">{artwork.initials}</span>
                         <CardBadges item={item} />
                       </div>
 
                       <div className="catalog-copy">
-                        <div className="catalog-topline">
-                          <h3>{item.title}</h3>
-                          <span className="catalog-rate">IMDb {item.imdbRate.toFixed(1)}</span>
-                        </div>
+                        <h3 className="catalog-title" title={item.title}>{item.title}</h3>
                         <p className="catalog-meta">
                           <span>{item.year ?? "نامشخص"}</span>
                           <span>{formatCompactVotes(item.imdbVotes)}</span>
