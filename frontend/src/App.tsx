@@ -25,6 +25,10 @@ type ShareState =
   | { tone: "success"; message: string }
   | { tone: "error"; message: string }
   | null;
+type ToastState =
+  | { tone: "success"; message: string }
+  | { tone: "error"; message: string }
+  | null;
 type DirectoryResolutionState = {
   itemId: string;
   loading: boolean;
@@ -180,6 +184,17 @@ function formatSeasonTitle(seasonNumber: number | null): string {
   return `فصل ${toPersianNumber(seasonNumber)}`;
 }
 
+function formatLinkSize(size?: string | null): string {
+  if (!size || !size.trim()) {
+    return "باز کردن";
+  }
+
+  const normalized = size.trim();
+  return normalized.replace(/(\d+(?:\.\d+)?)\s*([mMgG])\b/g, (_, value: string, unit: string) =>
+    unit.toLowerCase() === "m" ? `${value} MB` : `${value} GB`
+  );
+}
+
 function toResolvedBuckets(links: DownloadLink[]): ResolvedParentBucket[] {
   const resolvedLinks = links.filter(isResolvedDirectoryLink);
   const grouped = new Map<string, Map<number | null, DownloadLink[]>>();
@@ -236,6 +251,14 @@ function withoutDirectoryLinksInSeasonGroups(seasons: SeasonGroup[]): SeasonGrou
   }));
 }
 
+async function copyTextToClipboard(value: string): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    throw new Error("امکان کپی لینک در این مرورگر وجود ندارد.");
+  }
+
+  await navigator.clipboard.writeText(value);
+}
+
 function chunkArray<T>(items: T[], chunkSize: number): T[][] {
   if (chunkSize <= 0) {
     return [items];
@@ -267,17 +290,44 @@ function CardBadges({ item }: { item: CatalogItem }) {
   );
 }
 
-function DownloadLinksBlock({ links }: { links: DownloadLink[] }) {
+function DownloadLinksBlock({
+  links,
+  stateKey,
+  onToast,
+  sizeLayout = "row"
+}: {
+  links: DownloadLink[];
+  stateKey: string;
+  onToast: (toast: Exclude<ToastState, null>) => void;
+  sizeLayout?: "row" | "stack";
+}) {
   const plainLinks = links.filter((link) => !isResolvedDirectoryLink(link));
   const resolvedBuckets = toResolvedBuckets(links);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setOpenSections({});
-  }, [links]);
+  }, [stateKey]);
 
   const toggleSection = (key: string) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const copyAllBucketLinks = async (bucket: ResolvedParentBucket) => {
+    const lines = bucket.seasons.flatMap((season) => season.links.map((link) => link.url));
+    if (lines.length === 0) {
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(lines.join("\n"));
+      onToast({ tone: "success", message: "لینک ها در کلیپبورد کپی شدند!" });
+    } catch (err) {
+      onToast({
+        tone: "error",
+        message: err instanceof Error ? err.message : "کپی لینک‌ها ناموفق بود."
+      });
+    }
   };
 
   return (
@@ -285,9 +335,15 @@ function DownloadLinksBlock({ links }: { links: DownloadLink[] }) {
       {plainLinks.length > 0 ? (
         <div className="download-grid">
           {plainLinks.map((link) => (
-            <a key={link.url} href={link.url} className="download-link" target="_blank" rel="noreferrer">
+            <a
+              key={link.url}
+              href={link.url}
+              className={sizeLayout === "stack" ? "download-link stack-size" : "download-link"}
+              target="_blank"
+              rel="noreferrer"
+            >
               <span>{localizeDynamicLabel(link.label)}</span>
-              <strong>{link.size ?? "باز کردن"}</strong>
+              <strong>{formatLinkSize(link.size)}</strong>
             </a>
           ))}
         </div>
@@ -301,17 +357,28 @@ function DownloadLinksBlock({ links }: { links: DownloadLink[] }) {
             const totalEpisodes = bucket.seasons.reduce((sum, season) => sum + season.links.length, 0);
             return (
               <>
-                <button
-                  type="button"
-                  className="resolved-collapsible-trigger"
-                  onClick={() => toggleSection(sectionKey)}
-                  aria-expanded={isOpen}
-                >
-                  <span className="resolved-group-season-title">{localizeDynamicLabel(bucket.parentGroupName)}</span>
-                  <span className="resolved-collapsible-meta">
-                    {totalEpisodes.toLocaleString("fa-IR")} قسمت {isOpen ? "▾" : "▸"}
-                  </span>
-                </button>
+                <div className="resolved-collapsible-header">
+                  <button
+                    type="button"
+                    className="resolved-collapsible-trigger"
+                    onClick={() => toggleSection(sectionKey)}
+                    aria-expanded={isOpen}
+                  >
+                    <span className="resolved-group-season-title">{localizeDynamicLabel(bucket.parentGroupName)}</span>
+                    <span className="resolved-collapsible-meta">
+                      {totalEpisodes.toLocaleString("fa-IR")} قسمت {isOpen ? "▾" : "▸"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="resolved-copy-all-button"
+                    onClick={() => void copyAllBucketLinks(bucket)}
+                    title="کپی لینک همه قسمت ها"
+                    aria-label="کپی لینک همه قسمت ها"
+                  >
+                    ⎘
+                  </button>
+                </div>
                 {isOpen ? (
                   <div className="season-stack">
                     {bucket.seasons.map((season) => (
@@ -321,9 +388,15 @@ function DownloadLinksBlock({ links }: { links: DownloadLink[] }) {
                         ) : null}
                         <div className="download-grid">
                           {season.links.map((link) => (
-                            <a key={link.url} href={link.url} className="download-link" target="_blank" rel="noreferrer">
+                            <a
+                              key={link.url}
+                              href={link.url}
+                              className={sizeLayout === "stack" ? "download-link stack-size" : "download-link"}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
                               <span>{formatEpisodeLabel(link)}</span>
-                              <strong>{link.size ?? "باز کردن"}</strong>
+                              <strong>{formatLinkSize(link.size)}</strong>
                             </a>
                           ))}
                         </div>
@@ -612,6 +685,7 @@ export default function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [pendingSharedTitle, setPendingSharedTitle] = useState<string | null>(() => readRequestedTitle());
   const [shareState, setShareState] = useState<ShareState>(null);
+  const [toast, setToast] = useState<ToastState>(null);
   const [directoryResolution, setDirectoryResolution] = useState<DirectoryResolutionState | null>(null);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
@@ -792,29 +866,18 @@ export default function App() {
     }
 
     const { body } = document;
-    const scrollY = window.scrollY;
-    const previousPosition = body.style.position;
-    const previousTop = body.style.top;
-    const previousLeft = body.style.left;
-    const previousRight = body.style.right;
-    const previousWidth = body.style.width;
     const previousOverflow = body.style.overflow;
+    const previousTouchAction = body.style.touchAction;
+    const previousOverscrollBehavior = body.style.overscrollBehavior;
 
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.left = "0";
-    body.style.right = "0";
-    body.style.width = "100%";
     body.style.overflow = "hidden";
+    body.style.touchAction = "none";
+    body.style.overscrollBehavior = "none";
 
     return () => {
-      body.style.position = previousPosition;
-      body.style.top = previousTop;
-      body.style.left = previousLeft;
-      body.style.right = previousRight;
-      body.style.width = previousWidth;
       body.style.overflow = previousOverflow;
-      window.scrollTo({ top: scrollY, left: 0, behavior: "auto" });
+      body.style.touchAction = previousTouchAction;
+      body.style.overscrollBehavior = previousOverscrollBehavior;
     };
   }, [isDrawerOpen]);
 
@@ -845,6 +908,18 @@ export default function App() {
   useEffect(() => {
     setShareState(null);
   }, [activeId]);
+
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setToast(null);
+    }, 2500);
+
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
 
   useEffect(() => {
     if (!activeItem) {
@@ -1253,27 +1328,9 @@ export default function App() {
     const shareUrl = new URL(window.location.href);
     shareUrl.searchParams.set("title", item.imdbCode);
 
-    const method = typeof navigator !== "undefined" && typeof navigator.share === "function"
-      ? "web_share"
-      : "copy_link";
-
     try {
-      if (method === "web_share") {
-        await navigator.share({
-          title: item.title,
-          text: `نمایش ${item.title} در سکانس.`,
-          url: shareUrl.toString()
-        });
-        setShareState({ tone: "success", message: "با موفقیت ارسال شد" });
-        return;
-      }
-
-      if (!navigator.clipboard?.writeText) {
-        throw new Error("امکان کپی لینک در این مرورگر وجود ندارد.");
-      }
-
-      await navigator.clipboard.writeText(shareUrl.toString());
-      setShareState({ tone: "success", message: "لینک کپی شد" });
+      await copyTextToClipboard(shareUrl.toString());
+      setShareState({ tone: "success", message: "لینک عنوان کپی شد" });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
@@ -1524,7 +1581,7 @@ export default function App() {
                     className="drawer-share-button"
                     onClick={() => void shareTitle(activeItem)}
                   >
-                    اشتراک‌گذاری عنوان
+اشتراک گذاری
                   </button>
                   <a
                     className="imdb-link"
@@ -1532,7 +1589,6 @@ export default function App() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    <ImdbIcon />
                     مشاهده در IMDb
                   </a>
                 </div>
@@ -1558,7 +1614,12 @@ export default function App() {
                             {resolvedForActive.sectionErrors[`movie:${group.label}`]}
                           </p>
                         ) : null}
-                        <DownloadLinksBlock links={group.links} />
+                        <DownloadLinksBlock
+                          links={group.links}
+                          stateKey={`${activeItem.id}:movie:${group.label}`}
+                          onToast={setToast}
+                          sizeLayout="stack"
+                        />
                         {resolvedForActive?.pendingSections[`movie:${group.label}`] ? (
                           <DirectorySectionSkeleton />
                         ) : null}
@@ -1586,7 +1647,11 @@ export default function App() {
                                   {resolvedForActive.sectionErrors[`season:${season.seasonNumber}:${group.label}`]}
                                 </p>
                               ) : null}
-                              <DownloadLinksBlock links={group.links} />
+                              <DownloadLinksBlock
+                                links={group.links}
+                                stateKey={`${activeItem.id}:season:${season.seasonNumber}:${group.label}`}
+                                onToast={setToast}
+                              />
                               {resolvedForActive?.pendingSections[`season:${season.seasonNumber}:${group.label}`] ? (
                                 <DirectorySectionSkeleton />
                               ) : null}
@@ -1613,6 +1678,11 @@ export default function App() {
         <button type="button" className="scroll-top-fab" onClick={scrollToTop} aria-label="بازگشت به بالای صفحه">
           ⇧
         </button>
+      ) : null}
+      {toast ? (
+        <div className={toast.tone === "success" ? "app-toast success" : "app-toast error"} role="status" aria-live="polite">
+          {toast.message}
+        </div>
       ) : null}
 
       <div className={isSortMenuOpen ? "mobile-sort-sheet open" : "mobile-sort-sheet"}>
