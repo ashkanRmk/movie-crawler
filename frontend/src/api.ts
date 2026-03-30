@@ -1,4 +1,4 @@
-import type { CatalogResponse } from "./types";
+import type { CatalogResponse, ResolveDirectoryLinksResponse } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -32,4 +32,25 @@ export async function reloadCatalog(): Promise<void> {
   if (!res.ok) {
     throw new Error(`Reload failed: ${res.status}`);
   }
+}
+
+export async function resolveDirectoryLinks(urls: string[]): Promise<ResolveDirectoryLinksResponse> {
+  const normalizedUrls = Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
+  if (normalizedUrls.length === 0) {
+    return { results: [] };
+  }
+
+  const res = await fetch(`${API_BASE}/api/download-links/resolve`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ urls: normalizedUrls })
+  });
+
+  if (!res.ok) {
+    throw new Error(`Resolve directory links failed: ${res.status}`);
+  }
+
+  return res.json();
 }

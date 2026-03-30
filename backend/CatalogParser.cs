@@ -9,6 +9,7 @@ public sealed class CatalogParser
 {
     private static readonly Regex TitleRegex = new(@"^\s*\d+\.\s*(.+?)(?:\s+(\d{4}))?\s*$", RegexOptions.Compiled);
     private static readonly Regex SeasonRegex = new(@"^season\s+(\d+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex SeriesPathRegex = new(@"(^|/+)(se+ries\d*)(/+|$)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly string[] DubbedMarkers =
     [
         "dubbed",
@@ -92,7 +93,8 @@ public sealed class CatalogParser
             var votesText = ExtractValue(pNodes, "IMDb Votes:");
             var rateText = ExtractValue(pNodes, "IMDb Rates:");
 
-            var type = typeText.Equals("tvSeries", StringComparison.OrdinalIgnoreCase)
+            var inferredSeriesByLinks = HasSeriesPathInLinks(pNodes);
+            var type = typeText.Equals("tvSeries", StringComparison.OrdinalIgnoreCase) || inferredSeriesByLinks
                 ? TitleType.TvSeries
                 : TitleType.Movie;
 
@@ -252,6 +254,50 @@ public sealed class CatalogParser
         }
 
         return links;
+    }
+
+    private static bool HasSeriesPathInLinks(IEnumerable<HtmlNode> pNodes)
+    {
+        foreach (var pNode in pNodes)
+        {
+            var anchors = pNode.SelectNodes(".//a[@href]");
+            if (anchors is null)
+            {
+                continue;
+            }
+
+            foreach (var anchor in anchors)
+            {
+                var href = anchor.GetAttributeValue("href", string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(href))
+                {
+                    continue;
+                }
+
+                if (Uri.TryCreate(href, UriKind.Absolute, out var absoluteUri))
+                {
+                    if (HasSeriesPathSegment(absoluteUri.AbsolutePath))
+                    {
+                        return true;
+                    }
+
+                    continue;
+                }
+
+                if (HasSeriesPathSegment(href))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasSeriesPathSegment(string value)
+    {
+        var normalized = value.Replace('\\', '/');
+        return SeriesPathRegex.IsMatch(normalized);
     }
 
     private static string? ExtractSize(HtmlNode anchor)

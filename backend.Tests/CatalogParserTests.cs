@@ -122,4 +122,54 @@ public sealed class CatalogParserTests
         Assert.Single(catalog.Items);
         Assert.True(catalog.Items[0].IsDubbed);
     }
+
+    [Fact]
+    public void Parse_Overrides_Movie_Type_To_TvSeries_When_Link_Path_Contains_Series()
+    {
+        const string html = @"
+<html><body>
+<h3>1. Seven Worlds One Planet 2019</h3>
+<p><b>IMDb Code:</b> tt9902830</p>
+<p><b>Title Type:</b> movie</p>
+<p><b>IMDb Votes:</b> 25,000</p>
+<p><b>IMDb Rates:</b> 9.4</p>
+<p><b>SoftSub</b></p>
+<p><a href='https://dls6.iran-gamecenter-host.com/DonyayeSerial/series/Seven.Worlds.One.Planet/Soft.Sub/S01/480p.Web-DL'>480p</a></p>
+<hr>
+</body></html>";
+
+        var parser = new CatalogParser();
+        var catalog = parser.Parse(html, "https://source", DateTimeOffset.Parse("2024-01-01"));
+
+        Assert.Single(catalog.Items);
+        Assert.Equal(TitleType.TvSeries, catalog.Items[0].Type);
+        Assert.Single(catalog.Items[0].Seasons);
+        Assert.Single(catalog.Items[0].Seasons[0].Groups);
+        Assert.Single(catalog.Items[0].Seasons[0].Groups[0].Links);
+    }
+
+    [Fact]
+    public void Parse_Overrides_Movie_Type_To_TvSeries_When_Link_Path_Contains_Series2()
+    {
+        const string html = @"
+<html><body>
+<h3>1. Chernobyl 2019</h3>
+<p><b>IMDb Code:</b> tt7366338</p>
+<p><b>Title Type:</b> movie</p>
+<p><b>IMDb Votes:</b> 100,000</p>
+<p><b>IMDb Rates:</b> 9.4</p>
+<p><b>SoftSub</b></p>
+<p><a href='https://dls4.iran-gamecenter-host.com/DonyayeSerial/series2/tt7366338/SoftSub/S01/Chernobyl.S01E01.1080p.BluRay.SoftSub.Pahe.DonyayeSerial.mkv'>1080p</a></p>
+<hr>
+</body></html>";
+
+        var parser = new CatalogParser();
+        var catalog = parser.Parse(html, "https://source", DateTimeOffset.Parse("2024-01-01"));
+
+        Assert.Single(catalog.Items);
+        Assert.Equal(TitleType.TvSeries, catalog.Items[0].Type);
+        Assert.Single(catalog.Items[0].Seasons);
+        Assert.Single(catalog.Items[0].Seasons[0].Groups);
+        Assert.Single(catalog.Items[0].Seasons[0].Groups[0].Links);
+    }
 }

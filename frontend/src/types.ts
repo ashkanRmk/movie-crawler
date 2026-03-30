@@ -4,6 +4,9 @@ export interface DownloadLink {
   label: string;
   url: string;
   size?: string | null;
+  parentGroupName?: string | null;
+  seasonNumber?: number | null;
+  episodeNumber?: number | null;
 }
 
 export interface DownloadGroup {
@@ -38,4 +41,14 @@ export interface CatalogMeta {
 export interface CatalogResponse {
   meta: CatalogMeta;
   items: CatalogItem[];
+}
+
+export interface ResolvedDirectoryLinks {
+  url: string;
+  links: DownloadLink[];
+  error?: string | null;
+}
+
+export interface ResolveDirectoryLinksResponse {
+  results: ResolvedDirectoryLinks[];
 }

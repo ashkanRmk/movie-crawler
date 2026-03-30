@@ -7,6 +7,7 @@ Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 builder.Services.AddSingleton<CatalogParser>();
 builder.Services.AddSingleton<CatalogCache>();
+builder.Services.AddSingleton<DirectoryDownloadResolver>();
 builder.Services.AddHostedService<CatalogWarmupService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -129,6 +130,32 @@ app.MapGet("/api/catalog/status", (CatalogCache cache) =>
         hasCatalog = cache.Current is not null,
         lastError = cache.LastError,
         fetch = cache.LastFetchInfo
+    });
+});
+
+app.MapPost("/api/download-links/resolve", async (
+    ResolveDownloadLinksRequest? request,
+    DirectoryDownloadResolver resolver,
+    CancellationToken cancellationToken) =>
+{
+    var urls = (request?.Urls ?? [])
+        .Where(url => !string.IsNullOrWhiteSpace(url))
+        .Select(url => url.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    if (urls.Count == 0)
+    {
+        return Results.BadRequest(new
+        {
+            error = "At least one URL is required."
+        });
+    }
+
+    var results = await resolver.ResolveAsync(urls, cancellationToken).ConfigureAwait(false);
+    return Results.Ok(new ResolveDownloadLinksResponse
+    {
+        Results = results
     });
 });
 

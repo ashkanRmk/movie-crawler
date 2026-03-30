@@ -1,6 +1,6 @@
 import { type MouseEvent as ReactMouseEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCatalog } from "./api";
-import type { CatalogItem, TitleType } from "./types";
+import { fetchCatalog, resolveDirectoryLinks } from "./api";
+import type { CatalogItem, DownloadGroup, DownloadLink, SeasonGroup, TitleType } from "./types";
 import "./styles.css";
 
 const SORT_OPTIONS = [
@@ -25,6 +25,47 @@ type ShareState =
   | { tone: "success"; message: string }
   | { tone: "error"; message: string }
   | null;
+type DirectoryResolutionState = {
+  itemId: string;
+  loading: boolean;
+  movieDownloads: DownloadGroup[];
+  seasonDownloads: SeasonGroup[];
+  sectionErrors: Record<string, string>;
+};
+type ResolvedSeasonBucket = {
+  seasonNumber: number | null;
+  links: DownloadLink[];
+};
+type ResolvedParentBucket = {
+  parentGroupName: string;
+  seasons: ResolvedSeasonBucket[];
+};
+
+const VIDEO_FILE_EXTENSIONS = new Set([
+  ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v", ".ts", ".m2ts", ".webm", ".flv", ".mpeg", ".mpg"
+]);
+const EPISODE_ORDINAL_WORDS: Record<number, string> = {
+  1: "اول",
+  2: "دوم",
+  3: "سوم",
+  4: "چهارم",
+  5: "پنجم",
+  6: "ششم",
+  7: "هفتم",
+  8: "هشتم",
+  9: "نهم",
+  10: "دهم",
+  11: "یازدهم",
+  12: "دوازدهم",
+  13: "سیزدهم",
+  14: "چهاردهم",
+  15: "پانزدهم",
+  16: "شانزدهم",
+  17: "هفدهم",
+  18: "هجدهم",
+  19: "نوزدهم",
+  20: "بیستم"
+};
 
 function hashTitle(value: string): number {
   return value.split("").reduce((acc, char) => acc * 31 + char.charCodeAt(0), 7);
@@ -54,12 +95,223 @@ function localizeDynamicLabel(value: string): string {
     .replace(/dubbed/gi, "نسخه دوبله شده");
 }
 
+function getUrlPath(url: string): string | null {
+  try {
+    return new URL(url).pathname.toLowerCase();
+  } catch {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const withoutQuery = trimmed.split(/[?#]/)[0];
+    return withoutQuery.toLowerCase();
+  }
+}
+
+function isVideoFileUrl(url: string): boolean {
+  const pathname = getUrlPath(url);
+  if (!pathname) {
+    return false;
+  }
+
+  const dotIndex = pathname.lastIndexOf(".");
+  if (dotIndex === -1) {
+    return false;
+  }
+
+  return VIDEO_FILE_EXTENSIONS.has(pathname.slice(dotIndex));
+}
+
+function isDirectoryLink(url: string): boolean {
+  return !isVideoFileUrl(url);
+}
+
+function toDirectoryResolveKey(url: string): string {
+  return url.trim().replace(/\/+$/, "");
+}
+
+function buildSectionError(
+  sectionErrors: Record<string, string>,
+  sectionKey: string,
+  message: string
+): Record<string, string> {
+  if (sectionErrors[sectionKey]) {
+    return sectionErrors;
+  }
+
+  return { ...sectionErrors, [sectionKey]: message };
+}
+
+function isResolvedDirectoryLink(link: DownloadLink): boolean {
+  return Boolean(link.parentGroupName ?? link.seasonNumber ?? link.episodeNumber);
+}
+
+function toPersianNumber(value: number): string {
+  return value.toLocaleString("fa-IR");
+}
+
+function formatEpisodeLabel(link: DownloadLink): string {
+  if (!link.episodeNumber || link.episodeNumber <= 0) {
+    return localizeDynamicLabel(link.label);
+  }
+
+  const ordinal = EPISODE_ORDINAL_WORDS[link.episodeNumber];
+  if (ordinal) {
+    return `قسمت ${ordinal}`;
+  }
+
+  return `قسمت ${toPersianNumber(link.episodeNumber)}`;
+}
+
+function formatSeasonTitle(seasonNumber: number | null): string {
+  if (seasonNumber === null) {
+    return "سایر";
+  }
+
+  const ordinal = EPISODE_ORDINAL_WORDS[seasonNumber];
+  if (ordinal) {
+    return `فصل ${ordinal}`;
+  }
+
+  return `فصل ${toPersianNumber(seasonNumber)}`;
+}
+
+function toResolvedBuckets(links: DownloadLink[]): ResolvedParentBucket[] {
+  const resolvedLinks = links.filter(isResolvedDirectoryLink);
+  const grouped = new Map<string, Map<number | null, DownloadLink[]>>();
+
+  resolvedLinks.forEach((link) => {
+    const parentGroupName = link.parentGroupName?.trim() || "سایر";
+    const seasonKey = link.seasonNumber ?? null;
+    const parentMap = grouped.get(parentGroupName) ?? new Map<number | null, DownloadLink[]>();
+    if (!grouped.has(parentGroupName)) {
+      grouped.set(parentGroupName, parentMap);
+    }
+
+    const seasonLinks = parentMap.get(seasonKey) ?? [];
+    if (!parentMap.has(seasonKey)) {
+      parentMap.set(seasonKey, seasonLinks);
+    }
+
+    seasonLinks.push(link);
+  });
+
+  return Array.from(grouped.entries()).map(([parentGroupName, seasonsMap]) => ({
+    parentGroupName,
+    seasons: Array.from(seasonsMap.entries())
+      .map(([seasonNumber, seasonLinks]) => ({
+        seasonNumber,
+        links: seasonLinks
+      }))
+      .sort((a, b) => {
+        if (a.seasonNumber === null) return 1;
+        if (b.seasonNumber === null) return -1;
+        return a.seasonNumber - b.seasonNumber;
+      })
+  }));
+}
+
+function withoutDirectoryLinks(links: DownloadLink[]): DownloadLink[] {
+  return links.filter((link) => !isDirectoryLink(link.url));
+}
+
+function withoutDirectoryLinksInMovieGroups(groups: DownloadGroup[]): DownloadGroup[] {
+  return groups.map((group) => ({
+    ...group,
+    links: withoutDirectoryLinks(group.links)
+  }));
+}
+
+function withoutDirectoryLinksInSeasonGroups(seasons: SeasonGroup[]): SeasonGroup[] {
+  return seasons.map((season) => ({
+    ...season,
+    groups: season.groups.map((group) => ({
+      ...group,
+      links: withoutDirectoryLinks(group.links)
+    }))
+  }));
+}
+
 function CardBadges({ item }: { item: CatalogItem }) {
   return (
     <div className="card-art-badges">
       <span className="card-art-badge">{formatType(item.type)}</span>
       {item.isDubbed ? <span className="card-art-badge dubbed">دوبله شده</span> : null}
     </div>
+  );
+}
+
+function DownloadLinksBlock({ links }: { links: DownloadLink[] }) {
+  const plainLinks = links.filter((link) => !isResolvedDirectoryLink(link));
+  const resolvedBuckets = toResolvedBuckets(links);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setOpenSections({});
+  }, [links]);
+
+  const toggleSection = (key: string) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  return (
+    <>
+      {plainLinks.length > 0 ? (
+        <div className="download-grid">
+          {plainLinks.map((link) => (
+            <a key={link.url} href={link.url} className="download-link" target="_blank" rel="noreferrer">
+              <span>{localizeDynamicLabel(link.label)}</span>
+              <strong>{link.size ?? "باز کردن"}</strong>
+            </a>
+          ))}
+        </div>
+      ) : null}
+
+      {resolvedBuckets.map((bucket) => (
+        <div key={bucket.parentGroupName} className="season-group">
+          {(() => {
+            const sectionKey = bucket.parentGroupName;
+            const isOpen = Boolean(openSections[sectionKey]);
+            const totalEpisodes = bucket.seasons.reduce((sum, season) => sum + season.links.length, 0);
+            return (
+              <>
+                <button
+                  type="button"
+                  className="resolved-collapsible-trigger"
+                  onClick={() => toggleSection(sectionKey)}
+                  aria-expanded={isOpen}
+                >
+                  <span className="resolved-group-season-title">{localizeDynamicLabel(bucket.parentGroupName)}</span>
+                  <span className="resolved-collapsible-meta">
+                    {totalEpisodes.toLocaleString("fa-IR")} قسمت {isOpen ? "▾" : "▸"}
+                  </span>
+                </button>
+                {isOpen ? (
+                  <div className="season-stack">
+                    {bucket.seasons.map((season) => (
+                      <div key={`${bucket.parentGroupName}:${season.seasonNumber ?? "other"}`} className="season-group">
+                        {season.seasonNumber !== null ? (
+                          <span className="season-label">{formatSeasonTitle(season.seasonNumber)}</span>
+                        ) : null}
+                        <div className="download-grid">
+                          {season.links.map((link) => (
+                            <a key={link.url} href={link.url} className="download-link" target="_blank" rel="noreferrer">
+                              <span>{formatEpisodeLabel(link)}</span>
+                              <strong>{link.size ?? "باز کردن"}</strong>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -335,6 +587,7 @@ export default function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [pendingSharedTitle, setPendingSharedTitle] = useState<string | null>(() => readRequestedTitle());
   const [shareState, setShareState] = useState<ShareState>(null);
+  const [directoryResolution, setDirectoryResolution] = useState<DirectoryResolutionState | null>(null);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -569,6 +822,149 @@ export default function App() {
   }, [activeId]);
 
   useEffect(() => {
+    if (!activeItem) {
+      setDirectoryResolution(null);
+      return;
+    }
+
+    const collectDirectoryUrls = () => {
+      const urls = new Set<string>();
+
+      activeItem.downloads.forEach((group) => {
+        group.links.forEach((link) => {
+          if (isDirectoryLink(link.url)) {
+            urls.add(link.url);
+          }
+        });
+      });
+
+      activeItem.seasons.forEach((season) => {
+        season.groups.forEach((group) => {
+          group.links.forEach((link) => {
+            if (isDirectoryLink(link.url)) {
+              urls.add(link.url);
+            }
+          });
+        });
+      });
+
+      return Array.from(urls);
+    };
+
+    const directoryUrls = collectDirectoryUrls();
+    if (directoryUrls.length === 0) {
+      setDirectoryResolution({
+        itemId: activeItem.id,
+        loading: false,
+        movieDownloads: activeItem.downloads,
+        seasonDownloads: activeItem.seasons,
+        sectionErrors: {}
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setDirectoryResolution({
+      itemId: activeItem.id,
+      loading: true,
+      movieDownloads: withoutDirectoryLinksInMovieGroups(activeItem.downloads),
+      seasonDownloads: withoutDirectoryLinksInSeasonGroups(activeItem.seasons),
+      sectionErrors: {}
+    });
+
+    const run = async () => {
+      try {
+        const resolved = await resolveDirectoryLinks(directoryUrls);
+        if (cancelled) {
+          return;
+        }
+
+        const resolveMap = new Map(resolved.results.map((entry) => [toDirectoryResolveKey(entry.url), entry]));
+        let sectionErrors: Record<string, string> = {};
+
+        const resolveGroupLinks = (links: DownloadLink[], sectionKey: string): DownloadLink[] => {
+          const nextLinks: DownloadLink[] = [];
+
+          links.forEach((link) => {
+            if (!isDirectoryLink(link.url)) {
+              nextLinks.push(link);
+              return;
+            }
+
+            const resolvedEntry = resolveMap.get(toDirectoryResolveKey(link.url));
+            if (!resolvedEntry) {
+              sectionErrors = buildSectionError(
+                sectionErrors,
+                sectionKey,
+                "پاسخ استخراج لینک برای پوشه دریافت نشد."
+              );
+              return;
+            }
+
+            if (resolvedEntry.error) {
+              sectionErrors = buildSectionError(sectionErrors, sectionKey, resolvedEntry.error);
+              return;
+            }
+
+            if (resolvedEntry.links.length === 0) {
+              sectionErrors = buildSectionError(
+                sectionErrors,
+                sectionKey,
+                "فایلی در پوشه پیدا نشد."
+              );
+              return;
+            }
+
+            nextLinks.push(...resolvedEntry.links);
+          });
+
+          return nextLinks;
+        };
+
+        const movieDownloads = activeItem.downloads.map((group) => ({
+          ...group,
+          links: resolveGroupLinks(group.links, `movie:${group.label}`)
+        }));
+
+        const seasonDownloads = activeItem.seasons.map((season) => ({
+          ...season,
+          groups: season.groups.map((group) => ({
+            ...group,
+            links: resolveGroupLinks(group.links, `season:${season.seasonNumber}:${group.label}`)
+          }))
+        }));
+
+        setDirectoryResolution({
+          itemId: activeItem.id,
+          loading: false,
+          movieDownloads,
+          seasonDownloads,
+          sectionErrors
+        });
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        setDirectoryResolution({
+          itemId: activeItem.id,
+          loading: false,
+          movieDownloads: withoutDirectoryLinksInMovieGroups(activeItem.downloads),
+          seasonDownloads: withoutDirectoryLinksInSeasonGroups(activeItem.seasons),
+          sectionErrors: {
+            global: err instanceof Error ? err.message : "استخراج پوشه با خطا مواجه شد."
+          }
+        });
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeItem]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -734,6 +1130,12 @@ export default function App() {
 
   const hasNoResults = syncState !== "loading" && (showGrid ? gridItems.length === 0 : movieItems.length + seriesItems.length === 0) && !error;
   const appClassName = isDrawerOpen ? "app drawer-active" : "app";
+  const resolvedForActive =
+    activeItem && directoryResolution?.itemId === activeItem.id
+      ? directoryResolution
+      : null;
+  const displayedMovieDownloads = resolvedForActive?.movieDownloads ?? activeItem?.downloads ?? [];
+  const displayedSeasonDownloads = resolvedForActive?.seasonDownloads ?? activeItem?.seasons ?? [];
 
   const searchControl = (
     <label className="hero-search">
@@ -981,29 +1383,33 @@ export default function App() {
                     {shareState.message}
                   </p>
                 ) : null}
+                {resolvedForActive?.loading ? (
+                  <p className="drawer-status">در حال دریافت فایل‌های داخل پوشه...</p>
+                ) : null}
+                {resolvedForActive?.sectionErrors.global ? (
+                  <p className="drawer-status error">{resolvedForActive.sectionErrors.global}</p>
+                ) : null}
 
                 {activeItem.type === "Movie" ? (
                   <div className="download-stack">
-                    {activeItem.downloads.map((group) => (
+                    {displayedMovieDownloads.map((group) => (
                       <section key={group.label} className="download-panel">
                         <header className="download-heading">
                           <h3>{localizeDynamicLabel(group.label)}</h3>
                           <span>{group.links.length.toLocaleString("fa-IR")} گزینه</span>
                         </header>
-                        <div className="download-grid">
-                          {group.links.map((link) => (
-                            <a key={link.url} href={link.url} className="download-link" target="_blank" rel="noreferrer">
-                              <span>{localizeDynamicLabel(link.label)}</span>
-                              <strong>{link.size ?? "باز کردن"}</strong>
-                            </a>
-                          ))}
-                        </div>
+                        {resolvedForActive?.sectionErrors[`movie:${group.label}`] ? (
+                          <p className="drawer-status error">
+                            {resolvedForActive.sectionErrors[`movie:${group.label}`]}
+                          </p>
+                        ) : null}
+                        <DownloadLinksBlock links={group.links} />
                       </section>
                     ))}
                   </div>
                 ) : (
                   <div className="download-stack">
-                    {activeItem.seasons.map((season) => (
+                    {displayedSeasonDownloads.map((season) => (
                       <section key={season.seasonNumber} className="download-panel">
                         <header className="download-heading">
                           <h3>فصل {season.seasonNumber.toLocaleString("fa-IR")}</h3>
@@ -1017,14 +1423,12 @@ export default function App() {
                           {season.groups.map((group) => (
                             <div key={group.label} className="season-group">
                               <span className="season-label">{localizeDynamicLabel(group.label)}</span>
-                              <div className="download-grid">
-                                {group.links.map((link) => (
-                                  <a key={link.url} href={link.url} className="download-link" target="_blank" rel="noreferrer">
-                                    <span>{localizeDynamicLabel(link.label)}</span>
-                                    <strong>{link.size ?? "باز کردن"}</strong>
-                                  </a>
-                                ))}
-                              </div>
+                              {resolvedForActive?.sectionErrors[`season:${season.seasonNumber}:${group.label}`] ? (
+                                <p className="drawer-status error">
+                                  {resolvedForActive.sectionErrors[`season:${season.seasonNumber}:${group.label}`]}
+                                </p>
+                              ) : null}
+                              <DownloadLinksBlock links={group.links} />
                             </div>
                           ))}
                         </div>

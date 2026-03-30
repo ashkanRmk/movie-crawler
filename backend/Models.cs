@@ -65,4 +65,24 @@ public sealed record DownloadLink
     public required string Label { get; init; }
     public required string Url { get; init; }
     public string? Size { get; init; }
+    public string? ParentGroupName { get; init; }
+    public int? SeasonNumber { get; init; }
+    public int? EpisodeNumber { get; init; }
+}
+
+public sealed record ResolveDownloadLinksRequest
+{
+    public List<string> Urls { get; init; } = [];
+}
+
+public sealed record ResolveDownloadLinksResponse
+{
+    public required List<ResolvedDirectoryLinks> Results { get; init; }
+}
+
+public sealed record ResolvedDirectoryLinks
+{
+    public required string Url { get; init; }
+    public List<DownloadLink> Links { get; init; } = [];
+    public string? Error { get; init; }
 }
