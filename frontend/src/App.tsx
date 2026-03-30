@@ -31,6 +31,7 @@ type DirectoryResolutionState = {
   movieDownloads: DownloadGroup[];
   seasonDownloads: SeasonGroup[];
   sectionErrors: Record<string, string>;
+  pendingSections: Record<string, boolean>;
 };
 type ResolvedSeasonBucket = {
   seasonNumber: number | null;
@@ -44,6 +45,8 @@ type ResolvedParentBucket = {
 const VIDEO_FILE_EXTENSIONS = new Set([
   ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v", ".ts", ".m2ts", ".webm", ".flv", ".mpeg", ".mpg"
 ]);
+const DIRECTORY_CHUNK_THRESHOLD = 3;
+const DIRECTORY_CHUNK_SIZE = 3;
 const EPISODE_ORDINAL_WORDS: Record<number, string> = {
   1: "اول",
   2: "دوم",
@@ -231,6 +234,28 @@ function withoutDirectoryLinksInSeasonGroups(seasons: SeasonGroup[]): SeasonGrou
       links: withoutDirectoryLinks(group.links)
     }))
   }));
+}
+
+function chunkArray<T>(items: T[], chunkSize: number): T[][] {
+  if (chunkSize <= 0) {
+    return [items];
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
+function DirectorySectionSkeleton({ rows = 2 }: { rows?: number }) {
+  return (
+    <div className="drawer-section-skeleton" aria-hidden="true">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div key={index} className="skeleton-line drawer-section-skeleton-line" />
+      ))}
+    </div>
+  );
 }
 
 function CardBadges({ item }: { item: CatalogItem }) {
@@ -858,89 +883,220 @@ export default function App() {
         loading: false,
         movieDownloads: activeItem.downloads,
         seasonDownloads: activeItem.seasons,
-        sectionErrors: {}
+        sectionErrors: {},
+        pendingSections: {}
       });
       return;
     }
 
     let cancelled = false;
-    setDirectoryResolution({
-      itemId: activeItem.id,
-      loading: true,
-      movieDownloads: withoutDirectoryLinksInMovieGroups(activeItem.downloads),
-      seasonDownloads: withoutDirectoryLinksInSeasonGroups(activeItem.seasons),
-      sectionErrors: {}
+    const controller = new AbortController();
+
+    const urlByKey = new Map<string, string>();
+    const sectionToDirectoryKeys = new Map<string, Set<string>>();
+    const directoryKeys = new Set<string>();
+
+    const registerDirectoryLink = (url: string, sectionKey: string) => {
+      if (!isDirectoryLink(url)) {
+        return;
+      }
+
+      const key = toDirectoryResolveKey(url);
+      if (!key) {
+        return;
+      }
+
+      const normalizedUrl = url.trim();
+      if (!normalizedUrl) {
+        return;
+      }
+
+      directoryKeys.add(key);
+      if (!urlByKey.has(key)) {
+        urlByKey.set(key, normalizedUrl);
+      }
+
+      const sectionKeys = sectionToDirectoryKeys.get(sectionKey) ?? new Set<string>();
+      sectionKeys.add(key);
+      if (!sectionToDirectoryKeys.has(sectionKey)) {
+        sectionToDirectoryKeys.set(sectionKey, sectionKeys);
+      }
+    };
+
+    activeItem.downloads.forEach((group) => {
+      const sectionKey = `movie:${group.label}`;
+      group.links.forEach((link) => registerDirectoryLink(link.url, sectionKey));
     });
+
+    activeItem.seasons.forEach((season) => {
+      season.groups.forEach((group) => {
+        const sectionKey = `season:${season.seasonNumber}:${group.label}`;
+        group.links.forEach((link) => registerDirectoryLink(link.url, sectionKey));
+      });
+    });
+
+    const allDirectoryKeys = Array.from(directoryKeys);
+    if (allDirectoryKeys.length === 0) {
+      setDirectoryResolution({
+        itemId: activeItem.id,
+        loading: false,
+        movieDownloads: activeItem.downloads,
+        seasonDownloads: activeItem.seasons,
+        sectionErrors: {},
+        pendingSections: {}
+      });
+      return;
+    }
 
     const run = async () => {
       try {
-        const resolved = await resolveDirectoryLinks(directoryUrls);
-        if (cancelled) {
-          return;
-        }
-
-        const resolveMap = new Map(resolved.results.map((entry) => [toDirectoryResolveKey(entry.url), entry]));
+        const resolvedByKey = new Map<string, { links: DownloadLink[]; error?: string | null }>();
+        const completedKeys = new Set<string>();
         let sectionErrors: Record<string, string> = {};
 
-        const resolveGroupLinks = (links: DownloadLink[], sectionKey: string): DownloadLink[] => {
-          const nextLinks: DownloadLink[] = [];
-
-          links.forEach((link) => {
-            if (!isDirectoryLink(link.url)) {
-              nextLinks.push(link);
-              return;
+        const getPendingSections = (): Record<string, boolean> => {
+          const pendingSections: Record<string, boolean> = {};
+          sectionToDirectoryKeys.forEach((keys, sectionKey) => {
+            const hasPending = Array.from(keys).some((key) => !completedKeys.has(key));
+            if (hasPending) {
+              pendingSections[sectionKey] = true;
             }
-
-            const resolvedEntry = resolveMap.get(toDirectoryResolveKey(link.url));
-            if (!resolvedEntry) {
-              sectionErrors = buildSectionError(
-                sectionErrors,
-                sectionKey,
-                "پاسخ استخراج لینک برای پوشه دریافت نشد."
-              );
-              return;
-            }
-
-            if (resolvedEntry.error) {
-              sectionErrors = buildSectionError(sectionErrors, sectionKey, resolvedEntry.error);
-              return;
-            }
-
-            if (resolvedEntry.links.length === 0) {
-              sectionErrors = buildSectionError(
-                sectionErrors,
-                sectionKey,
-                "فایلی در پوشه پیدا نشد."
-              );
-              return;
-            }
-
-            nextLinks.push(...resolvedEntry.links);
           });
-
-          return nextLinks;
+          return pendingSections;
         };
 
-        const movieDownloads = activeItem.downloads.map((group) => ({
-          ...group,
-          links: resolveGroupLinks(group.links, `movie:${group.label}`)
-        }));
+        const markSectionsForKeyError = (key: string, message: string) => {
+          sectionToDirectoryKeys.forEach((keys, sectionKey) => {
+            if (keys.has(key)) {
+              sectionErrors = buildSectionError(sectionErrors, sectionKey, message);
+            }
+          });
+        };
 
-        const seasonDownloads = activeItem.seasons.map((season) => ({
-          ...season,
-          groups: season.groups.map((group) => ({
+        const buildResolvedDownloads = () => {
+          const resolveGroupLinks = (links: DownloadLink[], sectionKey: string): DownloadLink[] => {
+            const nextLinks: DownloadLink[] = [];
+
+            links.forEach((link) => {
+              if (!isDirectoryLink(link.url)) {
+                nextLinks.push(link);
+                return;
+              }
+
+              const resolvedEntry = resolvedByKey.get(toDirectoryResolveKey(link.url));
+              if (!resolvedEntry) {
+                return;
+              }
+
+              if (resolvedEntry.error) {
+                sectionErrors = buildSectionError(sectionErrors, sectionKey, resolvedEntry.error);
+                return;
+              }
+
+              if (resolvedEntry.links.length === 0) {
+                sectionErrors = buildSectionError(sectionErrors, sectionKey, "فایلی در پوشه پیدا نشد.");
+                return;
+              }
+
+              nextLinks.push(...resolvedEntry.links);
+            });
+
+            return nextLinks;
+          };
+
+          const movieDownloads = activeItem.downloads.map((group) => ({
             ...group,
-            links: resolveGroupLinks(group.links, `season:${season.seasonNumber}:${group.label}`)
-          }))
-        }));
+            links: resolveGroupLinks(group.links, `movie:${group.label}`)
+          }));
+
+          const seasonDownloads = activeItem.seasons.map((season) => ({
+            ...season,
+            groups: season.groups.map((group) => ({
+              ...group,
+              links: resolveGroupLinks(group.links, `season:${season.seasonNumber}:${group.label}`)
+            }))
+          }));
+
+          return { movieDownloads, seasonDownloads };
+        };
+
+        const publishState = () => {
+          if (cancelled) {
+            return;
+          }
+
+          const { movieDownloads, seasonDownloads } = buildResolvedDownloads();
+          const pendingSections = getPendingSections();
+          setDirectoryResolution({
+            itemId: activeItem.id,
+            loading: Object.keys(pendingSections).length > 0,
+            movieDownloads,
+            seasonDownloads,
+            sectionErrors,
+            pendingSections
+          });
+        };
 
         setDirectoryResolution({
           itemId: activeItem.id,
-          loading: false,
-          movieDownloads,
-          seasonDownloads,
-          sectionErrors
+          loading: true,
+          movieDownloads: withoutDirectoryLinksInMovieGroups(activeItem.downloads),
+          seasonDownloads: withoutDirectoryLinksInSeasonGroups(activeItem.seasons),
+          sectionErrors: {},
+          pendingSections: getPendingSections()
         });
+
+        const requestUrls = Array.from(urlByKey.values());
+        const chunks = requestUrls.length > DIRECTORY_CHUNK_THRESHOLD
+          ? chunkArray(requestUrls, DIRECTORY_CHUNK_SIZE)
+          : [requestUrls];
+
+        for (const chunkUrls of chunks) {
+          if (cancelled) {
+            return;
+          }
+
+          const chunkKeys = new Set(chunkUrls.map((url) => toDirectoryResolveKey(url)));
+
+          try {
+            const resolved = await resolveDirectoryLinks(chunkUrls, controller.signal);
+            if (cancelled) {
+              return;
+            }
+
+            const seenKeys = new Set<string>();
+            resolved.results.forEach((entry) => {
+              const key = toDirectoryResolveKey(entry.url);
+              if (!chunkKeys.has(key)) {
+                return;
+              }
+
+              resolvedByKey.set(key, { links: entry.links, error: entry.error });
+              completedKeys.add(key);
+              seenKeys.add(key);
+            });
+
+            chunkKeys.forEach((key) => {
+              if (!seenKeys.has(key)) {
+                markSectionsForKeyError(key, "پاسخ استخراج لینک برای پوشه دریافت نشد.");
+                completedKeys.add(key);
+              }
+            });
+
+            publishState();
+          } catch (err) {
+            if (cancelled || (err instanceof DOMException && err.name === "AbortError")) {
+              return;
+            }
+
+            const message = err instanceof Error ? err.message : "استخراج پوشه با خطا مواجه شد.";
+            chunkKeys.forEach((key) => {
+              markSectionsForKeyError(key, message);
+              completedKeys.add(key);
+            });
+            publishState();
+          }
+        }
       } catch (err) {
         if (cancelled) {
           return;
@@ -953,7 +1109,8 @@ export default function App() {
           seasonDownloads: withoutDirectoryLinksInSeasonGroups(activeItem.seasons),
           sectionErrors: {
             global: err instanceof Error ? err.message : "استخراج پوشه با خطا مواجه شد."
-          }
+          },
+          pendingSections: {}
         });
       }
     };
@@ -961,6 +1118,7 @@ export default function App() {
     void run();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [activeItem]);
 
@@ -1383,9 +1541,6 @@ export default function App() {
                     {shareState.message}
                   </p>
                 ) : null}
-                {resolvedForActive?.loading ? (
-                  <p className="drawer-status">در حال دریافت فایل‌های داخل پوشه...</p>
-                ) : null}
                 {resolvedForActive?.sectionErrors.global ? (
                   <p className="drawer-status error">{resolvedForActive.sectionErrors.global}</p>
                 ) : null}
@@ -1404,6 +1559,9 @@ export default function App() {
                           </p>
                         ) : null}
                         <DownloadLinksBlock links={group.links} />
+                        {resolvedForActive?.pendingSections[`movie:${group.label}`] ? (
+                          <DirectorySectionSkeleton />
+                        ) : null}
                       </section>
                     ))}
                   </div>
@@ -1429,6 +1587,9 @@ export default function App() {
                                 </p>
                               ) : null}
                               <DownloadLinksBlock links={group.links} />
+                              {resolvedForActive?.pendingSections[`season:${season.seasonNumber}:${group.label}`] ? (
+                                <DirectorySectionSkeleton />
+                              ) : null}
                             </div>
                           ))}
                         </div>

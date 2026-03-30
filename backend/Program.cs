@@ -1,4 +1,5 @@
 using System.Text;
+using System.Net;
 using MovieCrawler.Backend;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +17,14 @@ builder.Services.AddHttpClient("catalog", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("MovieCrawler/1.0");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    // Large resolve batches often target the same host; increase per-host parallel sockets.
+    MaxConnectionsPerServer = 64,
+    PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
 });
 
 builder.Services.AddCors(options =>

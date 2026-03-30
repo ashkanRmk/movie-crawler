@@ -691,6 +691,17 @@ button {
   color: var(--danger);
 }
 
+.drawer-section-skeleton {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.drawer-section-skeleton-line {
+  height: 46px;
+  border-radius: 14px;
+}
+
 .download-stack {
   display: grid;
   gap: 16px;

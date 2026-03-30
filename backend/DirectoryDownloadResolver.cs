@@ -15,7 +15,7 @@ public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFacto
         ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v", ".ts", ".m2ts", ".webm", ".flv", ".mpeg", ".mpg"
     ];
     private static readonly string[] CodecTokens = ["x264", "x265", "h264", "h265", "hevc", "av1"];
-    private const int MaxParallelResolutions = 8;
+    private const int MaxParallelResolutions = 24;
 
     public async Task<List<ResolvedDirectoryLinks>> ResolveAsync(IEnumerable<string> urls, CancellationToken cancellationToken)
     {
@@ -26,13 +26,17 @@ public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFacto
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        using var semaphore = new SemaphoreSlim(MaxParallelResolutions);
+        var parallelism = Math.Min(MaxParallelResolutions, Math.Max(1, normalizedUrls.Count));
+        using var semaphore = new SemaphoreSlim(parallelism);
         var tasks = normalizedUrls.Select(async url =>
         {
             await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+                using var response = await client.GetAsync(
+                    url,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
                     return new ResolvedDirectoryLinks

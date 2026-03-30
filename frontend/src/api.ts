@@ -34,7 +34,10 @@ export async function reloadCatalog(): Promise<void> {
   }
 }
 
-export async function resolveDirectoryLinks(urls: string[]): Promise<ResolveDirectoryLinksResponse> {
+export async function resolveDirectoryLinks(
+  urls: string[],
+  signal?: AbortSignal
+): Promise<ResolveDirectoryLinksResponse> {
   const normalizedUrls = Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
   if (normalizedUrls.length === 0) {
     return { results: [] };
@@ -42,6 +45,7 @@ export async function resolveDirectoryLinks(urls: string[]): Promise<ResolveDire
 
   const res = await fetch(`${API_BASE}/api/download-links/resolve`, {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json"
     },
