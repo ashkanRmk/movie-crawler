@@ -821,11 +821,8 @@ export default function App() {
         <>
           {showGrid ? (
             <>
-              <section className="section-header browse-header">
+              <section className="section-header browse-header show-all-header">
                 <div>
-                  <p className="section-kicker">
-                    {isSearchMode ? "نتیجه جستجو" : browseMode === "movie" ? "فیلم‌ها" : "سریال‌ها"}
-                  </p>
                   <h2>
                     {isSearchMode
                       ? `${gridItems.length.toLocaleString("fa-IR")} نتیجه`
@@ -1041,7 +1038,7 @@ export default function App() {
 
       {!isDrawerOpen && showScrollTopButton ? (
         <button type="button" className="scroll-top-fab" onClick={scrollToTop} aria-label="بازگشت به بالای صفحه">
-          ↑
+          ⇧
         </button>
       ) : null}
 
