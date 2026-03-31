@@ -8,7 +8,9 @@ Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 builder.Services.AddSingleton<CatalogParser>();
 builder.Services.AddSingleton<CatalogCache>();
-builder.Services.AddSingleton<DirectoryDownloadResolver>();
+builder.Services.AddSingleton<IDirectoryDownloadResolver, DirectoryDownloadResolver>();
+builder.Services.AddSingleton<TvSeriesDirectoryLinksCache>();
+builder.Services.AddSingleton<DownloadLinksResolveService>();
 builder.Services.AddHostedService<CatalogWarmupService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -109,7 +111,10 @@ app.MapGet("/api/catalog", (CatalogCache cache, string? q, string? type, string?
     });
 });
 
-app.MapPost("/api/catalog/reload", async (CatalogCache cache, CancellationToken cancellationToken) =>
+app.MapPost("/api/catalog/reload", async (
+    CatalogCache cache,
+    TvSeriesDirectoryLinksCache directoryLinksCache,
+    CancellationToken cancellationToken) =>
 {
     var success = await cache.ReloadAsync(cancellationToken).ConfigureAwait(false);
     var catalog = cache.Current;
@@ -124,6 +129,8 @@ app.MapPost("/api/catalog/reload", async (CatalogCache cache, CancellationToken 
                 ["sourceUrl"] = cache.SourceUrl
             });
     }
+
+    directoryLinksCache.Clear();
 
     return Results.Ok(new
     {
@@ -144,16 +151,10 @@ app.MapGet("/api/catalog/status", (CatalogCache cache) =>
 
 app.MapPost("/api/download-links/resolve", async (
     ResolveDownloadLinksRequest? request,
-    DirectoryDownloadResolver resolver,
+    DownloadLinksResolveService resolveService,
     CancellationToken cancellationToken) =>
 {
-    var urls = (request?.Urls ?? [])
-        .Where(url => !string.IsNullOrWhiteSpace(url))
-        .Select(url => url.Trim())
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .ToList();
-
-    if (urls.Count == 0)
+    if ((request?.Urls ?? []).All(url => string.IsNullOrWhiteSpace(url)))
     {
         return Results.BadRequest(new
         {
@@ -161,11 +162,8 @@ app.MapPost("/api/download-links/resolve", async (
         });
     }
 
-    var results = await resolver.ResolveAsync(urls, cancellationToken).ConfigureAwait(false);
-    return Results.Ok(new ResolveDownloadLinksResponse
-    {
-        Results = results
-    });
+    var response = await resolveService.ResolveAsync(request, cancellationToken).ConfigureAwait(false);
+    return Results.Ok(response);
 });
 
 app.Run();

@@ -1,4 +1,4 @@
-import type { CatalogResponse, ResolveDirectoryLinksResponse } from "./types";
+import type { CatalogResponse, ResolveDirectoryLinksResponse, TitleType } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -36,6 +36,7 @@ export async function reloadCatalog(): Promise<void> {
 
 export async function resolveDirectoryLinks(
   urls: string[],
+  titleType: TitleType,
   signal?: AbortSignal
 ): Promise<ResolveDirectoryLinksResponse> {
   const normalizedUrls = Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
@@ -49,7 +50,7 @@ export async function resolveDirectoryLinks(
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ urls: normalizedUrls })
+    body: JSON.stringify({ urls: normalizedUrls, titleType })
   });
 
   if (!res.ok) {

@@ -353,7 +353,7 @@ function DownloadLinksBlock({
 
     try {
       await copyTextToClipboard(lines.join("\n"));
-      onToast({ tone: "success", message: "لینک ها در کلیپبورد کپی شدند!" });
+      onToast({ tone: "success", message: "همه لینک های فصل در کلیپبورد کپی شدند!" });
     } catch (err) {
       onToast({
         tone: "error",
@@ -1166,7 +1166,7 @@ export default function App() {
           const chunkKeys = new Set(chunkUrls.map((url) => toDirectoryResolveKey(url)));
 
           try {
-            const resolved = await resolveDirectoryLinks(chunkUrls, controller.signal);
+            const resolved = await resolveDirectoryLinks(chunkUrls, activeItem.type, controller.signal);
             if (cancelled) {
               return;
             }

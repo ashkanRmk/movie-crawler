@@ -72,6 +72,9 @@ public sealed record DownloadLink
 
 public sealed record ResolveDownloadLinksRequest
 {
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public TitleType? TitleType { get; init; }
+
     public List<string> Urls { get; init; } = [];
 }
 

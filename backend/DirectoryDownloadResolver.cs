@@ -3,7 +3,12 @@ using HtmlAgilityPack;
 
 namespace MovieCrawler.Backend;
 
-public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFactory)
+public interface IDirectoryDownloadResolver
+{
+    Task<List<ResolvedDirectoryLinks>> ResolveAsync(IEnumerable<string> urls, CancellationToken cancellationToken);
+}
+
+public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFactory) : IDirectoryDownloadResolver
 {
     private static readonly Regex MultiSpaceRegex = new(@"\s+", RegexOptions.Compiled);
     private static readonly Regex SeasonEpisodeRegex = new(@"[Ss](\d{1,2})[\s._-]*[Ee](\d{1,3})", RegexOptions.Compiled);
