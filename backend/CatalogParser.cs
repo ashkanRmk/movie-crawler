@@ -8,6 +8,7 @@ namespace MovieCrawler.Backend;
 public sealed class CatalogParser
 {
     private static readonly Regex TitleRegex = new(@"^\s*\d+\.\s*(.+?)(?:\s+(\d{4}))?\s*$", RegexOptions.Compiled);
+    private static readonly Regex YearFallbackRegex = new(@"\b(19|20)\d{2}\b", RegexOptions.Compiled);
     private static readonly Regex SeasonRegex = new(@"^season\s+(\d+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex SeriesPathRegex = new(@"(^|/+)(se+ries\d*)(/+|$)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly string[] DubbedMarkers =
@@ -31,6 +32,7 @@ public sealed class CatalogParser
     {
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
+        Uri? sourceUri = Uri.TryCreate(sourceUrl, UriKind.Absolute, out var parsedSourceUri) ? parsedSourceUri : null;
 
         var root = doc.DocumentNode.SelectSingleNode("//body") ?? doc.DocumentNode;
 
@@ -52,7 +54,7 @@ public sealed class CatalogParser
 
         foreach (var header in headers)
         {
-            var headerText = Normalize(header.InnerText);
+            var headerText = Normalize(ToLatinDigits(header.InnerText));
             var titleMatch = TitleRegex.Match(headerText);
             if (!titleMatch.Success)
             {
@@ -60,11 +62,7 @@ public sealed class CatalogParser
             }
 
             var title = titleMatch.Groups[1].Value.Trim();
-            int? year = null;
-            if (titleMatch.Groups[2].Success && int.TryParse(titleMatch.Groups[2].Value, out var parsedYear))
-            {
-                year = parsedYear;
-            }
+            int? year = ParseYear(titleMatch.Groups[2].Value, title);
 
             var pNodes = new List<HtmlNode>();
             var current = header.NextSibling;
@@ -114,11 +112,11 @@ public sealed class CatalogParser
 
             if (type == TitleType.Movie)
             {
-                ParseMovieDownloads(pNodes, item);
+                ParseMovieDownloads(pNodes, item, sourceUri);
             }
             else
             {
-                ParseSeriesDownloads(pNodes, item);
+                ParseSeriesDownloads(pNodes, item, sourceUri);
             }
 
             item = item with { IsDubbed = IsDubbed(item) };
@@ -137,7 +135,7 @@ public sealed class CatalogParser
         };
     }
 
-    private static void ParseMovieDownloads(List<HtmlNode> pNodes, CatalogItem item)
+    private static void ParseMovieDownloads(List<HtmlNode> pNodes, CatalogItem item, Uri? sourceUri)
     {
         DownloadGroup? currentGroup = null;
         foreach (var p in pNodes)
@@ -153,7 +151,7 @@ public sealed class CatalogParser
                 }
             }
 
-            var links = ExtractLinks(p);
+            var links = ExtractLinks(p, sourceUri);
             if (links.Count == 0)
             {
                 continue;
@@ -164,7 +162,7 @@ public sealed class CatalogParser
         }
     }
 
-    private static void ParseSeriesDownloads(List<HtmlNode> pNodes, CatalogItem item)
+    private static void ParseSeriesDownloads(List<HtmlNode> pNodes, CatalogItem item, Uri? sourceUri)
     {
         DownloadGroup? currentGroup = null;
         SeasonGroup? currentSeason = null;
@@ -197,7 +195,7 @@ public sealed class CatalogParser
                 continue;
             }
 
-            var links = ExtractLinks(p);
+            var links = ExtractLinks(p, sourceUri);
             if (links.Count == 0)
             {
                 continue;
@@ -225,7 +223,7 @@ public sealed class CatalogParser
         return string.Empty;
     }
 
-    private static List<DownloadLink> ExtractLinks(HtmlNode pNode)
+    private static List<DownloadLink> ExtractLinks(HtmlNode pNode, Uri? sourceUri)
     {
         var links = new List<DownloadLink>();
         var anchors = pNode.SelectNodes(".//a");
@@ -236,7 +234,8 @@ public sealed class CatalogParser
 
         foreach (var anchor in anchors)
         {
-            var url = anchor.GetAttributeValue("href", string.Empty).Trim();
+            var rawUrl = anchor.GetAttributeValue("href", string.Empty).Trim();
+            var url = ResolveUrl(rawUrl, sourceUri);
             if (string.IsNullOrWhiteSpace(url))
             {
                 continue;
@@ -254,6 +253,27 @@ public sealed class CatalogParser
         }
 
         return links;
+    }
+
+    private static string ResolveUrl(string rawUrl, Uri? sourceUri)
+    {
+        var value = (rawUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        if (Uri.TryCreate(value, UriKind.Absolute, out var absolute))
+        {
+            return absolute.ToString();
+        }
+
+        if (sourceUri is not null && Uri.TryCreate(sourceUri, value, out var combined))
+        {
+            return combined.ToString();
+        }
+
+        return value;
     }
 
     private static bool HasSeriesPathInLinks(IEnumerable<HtmlNode> pNodes)
@@ -368,7 +388,7 @@ public sealed class CatalogParser
             return 0;
         }
 
-        var cleaned = text.Replace(",", string.Empty).Trim();
+        var cleaned = ToLatinDigits(text).Replace(",", string.Empty).Trim();
         return int.TryParse(cleaned, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
             ? value
             : 0;
@@ -381,9 +401,29 @@ public sealed class CatalogParser
             return 0;
         }
 
-        return double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+        return double.TryParse(ToLatinDigits(text).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
             ? value
             : 0;
+    }
+
+    private static int? ParseYear(string? exactYear, string title)
+    {
+        if (!string.IsNullOrWhiteSpace(exactYear) &&
+            int.TryParse(ToLatinDigits(exactYear), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) &&
+            value is >= 1900 and <= 2100)
+        {
+            return value;
+        }
+
+        var fallback = YearFallbackRegex.Match(ToLatinDigits(title));
+        if (fallback.Success &&
+            int.TryParse(fallback.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) &&
+            parsed is >= 1900 and <= 2100)
+        {
+            return parsed;
+        }
+
+        return null;
     }
 
     private static bool IsDownloadGroupLabel(string label)
@@ -431,4 +471,27 @@ public sealed class CatalogParser
 
     private static string Normalize(string value)
         => HtmlEntity.DeEntitize(value).Replace("\n", " ").Replace("\r", " ").Trim();
+
+    private static string ToLatinDigits(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        var chars = value.ToCharArray();
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (chars[i] is >= '\u06F0' and <= '\u06F9')
+            {
+                chars[i] = (char)('0' + (chars[i] - '\u06F0'));
+            }
+            else if (chars[i] is >= '\u0660' and <= '\u0669')
+            {
+                chars[i] = (char)('0' + (chars[i] - '\u0660'));
+            }
+        }
+
+        return new string(chars);
+    }
 }

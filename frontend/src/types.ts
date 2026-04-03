@@ -28,6 +28,14 @@ export interface CatalogItem {
   imdbRate: number;
   imdbVotes: number;
   isDubbed: boolean;
+  summary?: string | null;
+  duration?: string | null;
+  countryOrigin?: string | null;
+  genres: string[];
+  stars: string[];
+  ageRating?: string | null;
+  posterUrl?: string | null;
+  coverUrl?: string | null;
   downloads: DownloadGroup[];
   seasons: SeasonGroup[];
 }
@@ -51,4 +59,34 @@ export interface ResolvedDirectoryLinks {
 
 export interface ResolveDirectoryLinksResponse {
   results: ResolvedDirectoryLinks[];
+}
+
+export interface AuthUser {
+  id: number;
+  mobile: string;
+  subscription: number;
+  subscriptionExpiresAt?: string | null;
+  hasActiveSubscription: boolean;
+  remainingSeconds: number;
+}
+
+export interface AuthResponse {
+  token: string;
+  expiresAt: string;
+  user: AuthUser;
+}
+
+export interface SubscriptionPlan {
+  code: string;
+  title: string;
+  durationMonths: number;
+  priceToman: number;
+  paymentUrl: string;
+}
+
+export interface GenreItem {
+  id: string;
+  label: string;
+  titleType: TitleType;
+  count: number;
 }

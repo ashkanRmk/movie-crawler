@@ -38,6 +38,15 @@ public sealed record CatalogItem
     public required int ImdbVotes { get; init; }
     public bool IsDubbed { get; init; }
 
+    public string? Summary { get; init; }
+    public string? Duration { get; init; }
+    public string? CountryOrigin { get; init; }
+    public List<string> Genres { get; init; } = [];
+    public List<string> Stars { get; init; } = [];
+    public string? AgeRating { get; init; }
+    public string? PosterUrl { get; init; }
+    public string? CoverUrl { get; init; }
+
     public List<DownloadGroup> Downloads { get; init; } = [];
     public List<SeasonGroup> Seasons { get; init; } = [];
 }
@@ -88,4 +97,73 @@ public sealed record ResolvedDirectoryLinks
     public required string Url { get; init; }
     public List<DownloadLink> Links { get; init; } = [];
     public string? Error { get; init; }
+}
+
+public sealed record RegisterRequest
+{
+    public string Mobile { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
+}
+
+public sealed record LoginRequest
+{
+    public string Mobile { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
+}
+
+public sealed record ChangePasswordRequest
+{
+    public string CurrentPassword { get; init; } = string.Empty;
+    public string NewPassword { get; init; } = string.Empty;
+}
+
+public sealed record AuthResponse
+{
+    public required string Token { get; init; }
+    public required DateTimeOffset ExpiresAt { get; init; }
+    public required UserProfileDto User { get; init; }
+}
+
+public sealed record UserProfileDto
+{
+    public required int Id { get; init; }
+    public required string Mobile { get; init; }
+    public required int Subscription { get; init; }
+    public DateTimeOffset? SubscriptionExpiresAt { get; init; }
+    public required bool HasActiveSubscription { get; init; }
+    public required long RemainingSeconds { get; init; }
+}
+
+public sealed record SubscriptionPlanDto
+{
+    public required string Code { get; init; }
+    public required string Title { get; init; }
+    public required int DurationMonths { get; init; }
+    public required int PriceToman { get; init; }
+    public required string PaymentUrl { get; init; }
+}
+
+public sealed record GenreDto
+{
+    public required string Id { get; init; }
+    public required string Label { get; init; }
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public required TitleType TitleType { get; init; }
+
+    public required int Count { get; init; }
+}
+
+public sealed record CatalogSyncResult
+{
+    public required int Inserted { get; init; }
+    public required int Updated { get; init; }
+    public required int Unchanged { get; init; }
+    public required DateTimeOffset SyncedAt { get; init; }
+}
+
+public sealed record TokenIssueResult
+{
+    public required string Token { get; init; }
+    public required DateTimeOffset ExpiresAt { get; init; }
 }
