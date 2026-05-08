@@ -21,6 +21,8 @@ public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFacto
     ];
     private static readonly string[] CodecTokens = ["x264", "x265", "h264", "h265", "hevc", "av1"];
     private const int MaxParallelResolutions = 24;
+    private const int MaxTraversalDepth = 4;
+    private static readonly Regex SeasonDirectoryRegex = new(@"/S\d{1,2}/?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public async Task<List<ResolvedDirectoryLinks>> ResolveAsync(IEnumerable<string> urls, CancellationToken cancellationToken)
     {
@@ -38,22 +40,7 @@ public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFacto
             await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                using var response = await client.GetAsync(
-                    url,
-                    HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
-                {
-                    return new ResolvedDirectoryLinks
-                    {
-                        Url = url,
-                        Error = $"Directory request failed ({(int)response.StatusCode})."
-                    };
-                }
-
-                var html = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                var links = ParseDirectoryHtml(html, url);
-
+                var links = await ResolveDirectoryTreeAsync(client, url, cancellationToken).ConfigureAwait(false);
                 return new ResolvedDirectoryLinks
                 {
                     Url = url,
@@ -88,16 +75,101 @@ public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFacto
         doc.LoadHtml(html);
 
         var baseUri = Uri.TryCreate(sourceUrl, UriKind.Absolute, out var parsedBaseUri)
-            ? parsedBaseUri
+            ? NormalizeDirectoryBaseUri(parsedBaseUri)
             : null;
 
+        var (links, _) = ParseDirectoryRows(doc, baseUri);
+        return links
+            .GroupBy(link => link.Url, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private async Task<List<DownloadLink>> ResolveDirectoryTreeAsync(
+        HttpClient client,
+        string rootUrl,
+        CancellationToken cancellationToken)
+    {
+        var rootBaseUri = Uri.TryCreate(rootUrl, UriKind.Absolute, out var parsedRootBaseUri)
+            ? NormalizeDirectoryBaseUri(parsedRootBaseUri)
+            : throw new InvalidOperationException("Invalid directory URL.");
+        var rootKey = NormalizeDirectoryKey(rootBaseUri.ToString());
+        var rootIsSeasonDirectory = SeasonDirectoryRegex.IsMatch(rootBaseUri.AbsolutePath);
+
+        var pending = new Queue<(string Url, int Depth)>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var allLinks = new List<DownloadLink>();
+
+        pending.Enqueue((rootBaseUri.ToString(), 0));
+        visited.Add(rootKey);
+
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (currentUrl, depth) = pending.Dequeue();
+
+            using var response = await client.GetAsync(
+                currentUrl,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                if (depth == 0)
+                {
+                    throw new HttpRequestException($"Directory request failed ({(int)response.StatusCode}).");
+                }
+
+                continue;
+            }
+
+            var html = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var doc = new HtmlDocument();
+            doc.LoadHtml(html);
+
+            var currentBaseUri = Uri.TryCreate(currentUrl, UriKind.Absolute, out var parsedCurrentBaseUri)
+                ? NormalizeDirectoryBaseUri(parsedCurrentBaseUri)
+                : null;
+
+            var (links, directories) = ParseDirectoryRows(doc, currentBaseUri);
+            if (rootIsSeasonDirectory && depth == 0)
+            {
+                // For TV season roots, keep only links discovered inside format subdirectories.
+                links = [];
+            }
+            allLinks.AddRange(links);
+
+            if (depth >= MaxTraversalDepth)
+            {
+                continue;
+            }
+
+            foreach (var directoryUrl in directories)
+            {
+                var key = NormalizeDirectoryKey(directoryUrl);
+                if (visited.Add(key))
+                {
+                    pending.Enqueue((directoryUrl, depth + 1));
+                }
+            }
+        }
+
+        return allLinks
+            .GroupBy(link => link.Url, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static (List<DownloadLink> Links, List<string> Directories) ParseDirectoryRows(HtmlDocument doc, Uri? baseUri)
+    {
         var rows = doc.DocumentNode.SelectNodes("//tbody/tr") ?? doc.DocumentNode.SelectNodes("//tr");
         if (rows is null)
         {
-            return [];
+            return ([], []);
         }
 
         var links = new List<DownloadLink>();
+        var directories = new List<string>();
         foreach (var row in rows)
         {
             var anchor = row.SelectSingleNode(".//td[contains(@class,'n')]//a[@href]")
@@ -126,6 +198,7 @@ public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFacto
 
             if (IsDirectoryUrl(absoluteUrl, label))
             {
+                directories.Add(absoluteUrl);
                 continue;
             }
 
@@ -154,10 +227,7 @@ public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFacto
             });
         }
 
-        return links
-            .GroupBy(link => link.Url, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .ToList();
+        return (links, directories);
     }
 
     private static bool TryResolveUrl(Uri? baseUri, string href, out string absoluteUrl)
@@ -176,6 +246,52 @@ public sealed class DirectoryDownloadResolver(IHttpClientFactory httpClientFacto
 
         absoluteUrl = relativeUri.ToString();
         return true;
+    }
+
+    private static Uri NormalizeDirectoryBaseUri(Uri uri)
+    {
+        if (!uri.IsAbsoluteUri)
+        {
+            return uri;
+        }
+
+        // Apache/nginx listings are directory URLs, but some sources omit trailing slash.
+        // Without "/" Uri resolution treats the last segment as file and drops it.
+        if (uri.AbsolutePath.EndsWith("/", StringComparison.Ordinal))
+        {
+            return uri;
+        }
+
+        var extension = Path.GetExtension(uri.AbsolutePath);
+        if (!string.IsNullOrWhiteSpace(extension) && VideoExtensions.Contains(extension.ToLowerInvariant()))
+        {
+            return uri;
+        }
+
+        var withSlash = new UriBuilder(uri)
+        {
+            Path = $"{uri.AbsolutePath}/"
+        };
+        return withSlash.Uri;
+    }
+
+    private static string NormalizeDirectoryKey(string url)
+    {
+        var trimmed = (url ?? string.Empty).Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return trimmed.TrimEnd('/').ToLowerInvariant();
+        }
+
+        var scheme = uri.Scheme.ToLowerInvariant();
+        var authority = uri.IsDefaultPort ? uri.IdnHost.ToLowerInvariant() : $"{uri.IdnHost.ToLowerInvariant()}:{uri.Port}";
+        var path = uri.AbsolutePath.TrimEnd('/').ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = "/";
+        }
+
+        return $"{scheme}://{authority}{path}";
     }
 
     private static string GetFileName(string url)

@@ -154,6 +154,35 @@ public sealed class DirectoryDownloadResolverTests
         Assert.Equal("1080p BluRay x265 10bit", links[2].ParentGroupName);
     }
 
+    [Fact]
+    public void ParseDirectoryHtml_Keeps_Dotted_Format_Directory_In_File_Url()
+    {
+        const string html = """
+<html><body>
+  <table><tbody>
+    <tr>
+      <td class="n">
+        <a href="Breaking.Bad.S01E01.1080p.BluRay.SoftSub.Unknown.DonyayeSerial.mkv">
+          Breaking.Bad.S01E01.1080p.BluRay.SoftSub.Unknown.DonyayeSerial.mkv
+        </a>
+      </td>
+      <td class="s">1.02G</td>
+    </tr>
+  </tbody></table>
+</body></html>
+""";
+
+        var resolver = new DirectoryDownloadResolver(new TestHttpClientFactory());
+        var links = resolver.ParseDirectoryHtml(
+            html,
+            "https://dls7.iran-onemovies-dcenter.com/DonyayeSerial/series2/tt0903747/SoftSub/S01/1080p.BluRay");
+
+        var link = Assert.Single(links);
+        Assert.Equal(
+            "https://dls7.iran-onemovies-dcenter.com/DonyayeSerial/series2/tt0903747/SoftSub/S01/1080p.BluRay/Breaking.Bad.S01E01.1080p.BluRay.SoftSub.Unknown.DonyayeSerial.mkv",
+            link.Url);
+    }
+
     private sealed class TestHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();

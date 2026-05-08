@@ -7,6 +7,7 @@ public sealed class CatalogCache
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly CatalogParser _parser;
+    private readonly ILogger<CatalogCache> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly string _sourceUrl;
 
@@ -14,10 +15,15 @@ public sealed class CatalogCache
     private string? _lastError;
     private CatalogFetchInfo? _lastFetchInfo;
 
-    public CatalogCache(IHttpClientFactory httpClientFactory, CatalogParser parser, IConfiguration configuration)
+    public CatalogCache(
+        IHttpClientFactory httpClientFactory,
+        CatalogParser parser,
+        IConfiguration configuration,
+        ILogger<CatalogCache> logger)
     {
         _httpClientFactory = httpClientFactory;
         _parser = parser;
+        _logger = logger;
         _sourceUrl = configuration["Catalog:SourceUrl"]
             ?? "https://dls.iran-gamecenter-host.com/DonyayeSerial/offline_archive.html";
     }
@@ -61,11 +67,16 @@ public sealed class CatalogCache
                 Snippet = html.Length <= 1000 ? html : html[..1000]
             };
             _lastError = null;
+            _logger.LogInformation(
+                "Catalog fetched successfully from {SourceUrl}. Items: {ItemCount}, Bytes: {Bytes}",
+                _sourceUrl,
+                _catalog.Items.Count,
+                bytes.Length);
             return true;
         }
         catch (Exception ex)
         {
-            _lastError = ex.Message;
+            _lastError = $"{ex.GetType().Name}: {ex.Message}";
             _lastFetchInfo = new CatalogFetchInfo
             {
                 FetchedAt = null,
@@ -74,6 +85,7 @@ public sealed class CatalogCache
                 ContentLength = null,
                 Snippet = null
             };
+            _logger.LogError(ex, "Catalog fetch failed from {SourceUrl}", _sourceUrl);
             return false;
         }
         finally

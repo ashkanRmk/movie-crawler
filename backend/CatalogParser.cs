@@ -10,6 +10,11 @@ public sealed class CatalogParser
     private static readonly Regex TitleRegex = new(@"^\s*\d+\.\s*(.+?)(?:\s+(\d{4}))?\s*$", RegexOptions.Compiled);
     private static readonly Regex SeasonRegex = new(@"^season\s+(\d+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex SeriesPathRegex = new(@"(^|/+)(se+ries\d*)(/+|$)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex SeasonPathRegex = new(@"/S\d{1,2}/", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly HashSet<string> VideoExtensions =
+    [
+        ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".m4v", ".ts", ".m2ts", ".webm", ".flv", ".mpeg", ".mpg"
+    ];
     private static readonly string[] DubbedMarkers =
     [
         "dubbed",
@@ -245,15 +250,58 @@ public sealed class CatalogParser
             var label = Normalize(anchor.InnerText);
             var size = ExtractSize(anchor);
 
+            var normalizedUrl = NormalizeSeriesEpisodeUrlToSeasonDirectory(url);
+
             links.Add(new DownloadLink
             {
                 Label = label,
-                Url = url,
+                Url = normalizedUrl,
                 Size = string.IsNullOrWhiteSpace(size) ? null : size
             });
         }
 
         return links;
+    }
+
+    private static string NormalizeSeriesEpisodeUrlToSeasonDirectory(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return url;
+        }
+
+        var path = uri.AbsolutePath;
+        if (!HasSeriesPathSegment(path))
+        {
+            return url;
+        }
+
+        var extension = Path.GetExtension(path);
+        if (string.IsNullOrWhiteSpace(extension) || !VideoExtensions.Contains(extension.ToLowerInvariant()))
+        {
+            return url;
+        }
+
+        var match = SeasonPathRegex.Match(path);
+        if (!match.Success)
+        {
+            return url;
+        }
+
+        var seasonEnd = match.Index + match.Length;
+        var seasonDirectoryPath = path[..seasonEnd];
+        var withSlashPath = seasonDirectoryPath.EndsWith("/", StringComparison.Ordinal)
+            ? seasonDirectoryPath
+            : $"{seasonDirectoryPath}/";
+
+        var builder = new UriBuilder(uri)
+        {
+            Path = withSlashPath,
+            Query = string.Empty,
+            Fragment = string.Empty
+        };
+
+        return builder.Uri.ToString();
     }
 
     private static bool HasSeriesPathInLinks(IEnumerable<HtmlNode> pNodes)

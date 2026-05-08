@@ -18,16 +18,23 @@ public sealed class CatalogWarmupService : BackgroundService
             await _cache.LoadAsync(stoppingToken).ConfigureAwait(false);
             if (_cache.Current is null)
             {
-                _logger.LogWarning("Catalog warmup completed but cache is empty. Error: {Error}", _cache.LastError);
+                _logger.LogError(
+                    "Catalog warmup failed. Source: {SourceUrl}. Error: {Error}",
+                    _cache.SourceUrl,
+                    _cache.LastError);
             }
             else
             {
-                _logger.LogInformation("Catalog warmup completed. Items: {Count}", _cache.Current.Items.Count);
+                _logger.LogInformation(
+                    "Catalog warmup completed successfully. Source: {SourceUrl}. Items: {Count}. FetchedAt: {FetchedAt}",
+                    _cache.Current.Meta.SourceUrl,
+                    _cache.Current.Items.Count,
+                    _cache.Current.Meta.FetchedAt);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Catalog warmup failed.");
+            _logger.LogError(ex, "Catalog warmup failed with unhandled exception. Source: {SourceUrl}", _cache.SourceUrl);
         }
     }
 }

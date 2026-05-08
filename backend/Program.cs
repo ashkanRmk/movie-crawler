@@ -1,5 +1,7 @@
 using System.Text;
 using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using MovieCrawler.Backend;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,7 +28,25 @@ builder.Services.AddHttpClient("catalog", client =>
     MaxConnectionsPerServer = 64,
     PooledConnectionLifetime = TimeSpan.FromMinutes(10),
     PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+    SslOptions = new SslClientAuthenticationOptions
+    {
+        RemoteCertificateValidationCallback = static (_, certificate, chain, errors) =>
+        {
+            if (errors == SslPolicyErrors.None)
+            {
+                return true;
+            }
+
+            // Allow hostname mismatches for this upstream catalog host while still rejecting
+            // certificate chain/trust problems.
+            var onlyNameMismatch = errors == SslPolicyErrors.RemoteCertificateNameMismatch;
+            var chainIsTrusted = chain is null
+                || chain.ChainStatus.All(status => status.Status == X509ChainStatusFlags.NoError);
+
+            return onlyNameMismatch && chainIsTrusted && certificate is not null;
+        }
+    }
 });
 
 builder.Services.AddCors(options =>
