@@ -1,11 +1,11 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mirror-docker.runflare.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY backend.csproj ./
 RUN dotnet restore
 COPY . .
 RUN dotnet publish -c Release -o /app/publish
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mirror-docker.runflare.com/dotnet/aspnet:10.0
 WORKDIR /app
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
 COPY --from=build /app/publish .

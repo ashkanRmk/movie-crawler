@@ -18,7 +18,7 @@ VERSION=${1:-"1.0.0"}
 
 BACKEND_IMAGE="my-backend"
 FRONTEND_IMAGE="my-frontend"
-FRONTEND_API_BASE=${FRONTEND_API_BASE:-""}
+FRONTEND_API_BASE="https://3kans-back.devsquad.ir"
 REGISTRY=${REGISTRY:-"localhost:5000"}
 BACKEND_REGISTRY_IMAGE="$REGISTRY/$BACKEND_IMAGE:$VERSION"
 FRONTEND_REGISTRY_IMAGE="$REGISTRY/$FRONTEND_IMAGE:$VERSION"
@@ -37,7 +37,7 @@ docker buildx build \
 
 docker buildx build \
   --platform $PLATFORM \
-  --build-arg VITE_API_BASE="http://3kans-back.devsquad.ir" \
+  --build-arg VITE_API_BASE="https://3kans-back.devsquad.ir" \
   -t $FRONTEND_IMAGE:$VERSION \
   --load \
   ./frontend
