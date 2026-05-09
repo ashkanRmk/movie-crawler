@@ -14,7 +14,38 @@ REMOTE_DIR="/tmp"
 PLATFORM="linux/amd64"
 # PLATFORM="linux/arm64"
 
+BUILD_BACKEND=false
+BUILD_FRONTEND=false
+
+usage() {
+  cat <<USAGE
+Usage: $0 [-b] [-f] [version]
+
+Options:
+  -b    Build and deploy backend only
+  -f    Build and deploy frontend only
+  -h    Show this help
+
+If neither -b nor -f is provided, both backend and frontend are built and deployed.
+USAGE
+}
+
+while getopts ":bfh" opt; do
+  case "$opt" in
+    b) BUILD_BACKEND=true ;;
+    f) BUILD_FRONTEND=true ;;
+    h) usage; exit 0 ;;
+    \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
 VERSION=${1:-"1.0.0"}
+
+if [ "$BUILD_BACKEND" = false ] && [ "$BUILD_FRONTEND" = false ]; then
+  BUILD_BACKEND=true
+  BUILD_FRONTEND=true
+fi
 
 BACKEND_IMAGE="my-backend"
 FRONTEND_IMAGE="my-frontend"
@@ -29,18 +60,22 @@ FRONTEND_REGISTRY_IMAGE="$REGISTRY/$FRONTEND_IMAGE:$VERSION"
 
 echo "🚀 Building images for platform: $PLATFORM (version: $VERSION)"
 
-docker buildx build \
-  --platform $PLATFORM \
-  -t $BACKEND_IMAGE:$VERSION \
-  --load \
-  ./backend
+if [ "$BUILD_BACKEND" = true ]; then
+  docker buildx build \
+    --platform $PLATFORM \
+    -t $BACKEND_IMAGE:$VERSION \
+    --load \
+    ./backend
+fi
 
-docker buildx build \
-  --platform $PLATFORM \
-  --build-arg VITE_API_BASE="https://3kans-back.devsquad.ir" \
-  -t $FRONTEND_IMAGE:$VERSION \
-  --load \
-  ./frontend
+if [ "$BUILD_FRONTEND" = true ]; then
+  docker buildx build \
+    --platform $PLATFORM \
+    --build-arg VITE_API_BASE="$FRONTEND_API_BASE" \
+    -t $FRONTEND_IMAGE:$VERSION \
+    --load \
+    ./frontend
+fi
 
 ########################################
 # SAVE IMAGES
@@ -48,8 +83,12 @@ docker buildx build \
 
 echo "📦 Saving images..."
 
-docker image save -o ${BACKEND_IMAGE}_${VERSION}.tar $BACKEND_IMAGE:$VERSION
-docker image save -o ${FRONTEND_IMAGE}_${VERSION}.tar $FRONTEND_IMAGE:$VERSION
+if [ "$BUILD_BACKEND" = true ]; then
+  docker image save -o ${BACKEND_IMAGE}_${VERSION}.tar $BACKEND_IMAGE:$VERSION
+fi
+if [ "$BUILD_FRONTEND" = true ]; then
+  docker image save -o ${FRONTEND_IMAGE}_${VERSION}.tar $FRONTEND_IMAGE:$VERSION
+fi
 
 ########################################
 # COMPRESS
@@ -57,8 +96,12 @@ docker image save -o ${FRONTEND_IMAGE}_${VERSION}.tar $FRONTEND_IMAGE:$VERSION
 
 echo "🗜 Compressing..."
 
-gzip -f ${BACKEND_IMAGE}_${VERSION}.tar
-gzip -f ${FRONTEND_IMAGE}_${VERSION}.tar
+if [ "$BUILD_BACKEND" = true ]; then
+  gzip -f ${BACKEND_IMAGE}_${VERSION}.tar
+fi
+if [ "$BUILD_FRONTEND" = true ]; then
+  gzip -f ${FRONTEND_IMAGE}_${VERSION}.tar
+fi
 
 ########################################
 # TRANSFER TO SERVER
@@ -66,8 +109,12 @@ gzip -f ${FRONTEND_IMAGE}_${VERSION}.tar
 
 echo "📡 Copying to server..."
 
-scp ${BACKEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
-scp ${FRONTEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
+if [ "$BUILD_BACKEND" = true ]; then
+  scp ${BACKEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
+fi
+if [ "$BUILD_FRONTEND" = true ]; then
+  scp ${FRONTEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
+fi
 
 ########################################
 # LOAD ON SERVER
@@ -75,35 +122,44 @@ scp ${FRONTEND_IMAGE}_${VERSION}.tar.gz $SERVER_USER@$SERVER_HOST:$REMOTE_DIR/
 
 echo "📥 Loading images on server..."
 
-ssh $SERVER_USER@$SERVER_HOST << EOF
+ssh $SERVER_USER@$SERVER_HOST << EOF_REMOTE
   set -e
 
   echo "📂 Moving to $REMOTE_DIR"
   cd $REMOTE_DIR
 
   echo "📦 Extracting..."
+EOF_REMOTE
+
+if [ "$BUILD_BACKEND" = true ]; then
+  ssh $SERVER_USER@$SERVER_HOST << EOF_REMOTE
+  set -e
+  cd $REMOTE_DIR
   gunzip -f ${BACKEND_IMAGE}_${VERSION}.tar.gz
-  gunzip -f ${FRONTEND_IMAGE}_${VERSION}.tar.gz
-
-  echo "🐳 Loading into Docker..."
   docker image load -i ${BACKEND_IMAGE}_${VERSION}.tar
-  docker image load -i ${FRONTEND_IMAGE}_${VERSION}.tar
-
-  echo "🏷 Tagging images for registry: $REGISTRY"
   docker tag $BACKEND_IMAGE:$VERSION $BACKEND_REGISTRY_IMAGE
-  docker tag $FRONTEND_IMAGE:$VERSION $FRONTEND_REGISTRY_IMAGE
-
-  echo "📤 Pushing images to registry..."
   docker push $BACKEND_REGISTRY_IMAGE
-  docker push $FRONTEND_REGISTRY_IMAGE
-
-  echo "🧹 Cleanup..."
   rm -f ${BACKEND_IMAGE}_${VERSION}.tar
-  rm -f ${FRONTEND_IMAGE}_${VERSION}.tar
+EOF_REMOTE
+fi
 
+if [ "$BUILD_FRONTEND" = true ]; then
+  ssh $SERVER_USER@$SERVER_HOST << EOF_REMOTE
+  set -e
+  cd $REMOTE_DIR
+  gunzip -f ${FRONTEND_IMAGE}_${VERSION}.tar.gz
+  docker image load -i ${FRONTEND_IMAGE}_${VERSION}.tar
+  docker tag $FRONTEND_IMAGE:$VERSION $FRONTEND_REGISTRY_IMAGE
+  docker push $FRONTEND_REGISTRY_IMAGE
+  rm -f ${FRONTEND_IMAGE}_${VERSION}.tar
+EOF_REMOTE
+fi
+
+ssh $SERVER_USER@$SERVER_HOST << EOF_REMOTE
+  set -e
   echo "✅ Done. Available images:"
   docker image ls | grep -E "$BACKEND_IMAGE|$FRONTEND_IMAGE"
-EOF
+EOF_REMOTE
 
 ########################################
 # DONE
@@ -111,16 +167,24 @@ EOF
 
 echo ""
 echo "🎉 SUCCESS!"
-echo "Backend image:  $BACKEND_IMAGE:$VERSION"
-echo "Frontend image: $FRONTEND_IMAGE:$VERSION"
-echo "Backend registry image:  $BACKEND_REGISTRY_IMAGE"
-echo "Frontend registry image: $FRONTEND_REGISTRY_IMAGE"
+if [ "$BUILD_BACKEND" = true ]; then
+  echo "Backend image:  $BACKEND_IMAGE:$VERSION"
+  echo "Backend registry image:  $BACKEND_REGISTRY_IMAGE"
+fi
+if [ "$BUILD_FRONTEND" = true ]; then
+  echo "Frontend image: $FRONTEND_IMAGE:$VERSION"
+  echo "Frontend registry image: $FRONTEND_REGISTRY_IMAGE"
+fi
 echo ""
 echo "👉 Now go to Coolify and set:"
-echo "   Image = $BACKEND_REGISTRY_IMAGE"
-echo "   Image = $FRONTEND_REGISTRY_IMAGE"
-if [ -n "$FRONTEND_API_BASE" ]; then
-  echo "   Frontend API base = $FRONTEND_API_BASE"
-else
-  echo "   Frontend API base = same origin (/api)"
+if [ "$BUILD_BACKEND" = true ]; then
+  echo "   Backend Image = $BACKEND_REGISTRY_IMAGE"
+fi
+if [ "$BUILD_FRONTEND" = true ]; then
+  echo "   Frontend Image = $FRONTEND_REGISTRY_IMAGE"
+  if [ -n "$FRONTEND_API_BASE" ]; then
+    echo "   Frontend API base = $FRONTEND_API_BASE"
+  else
+    echo "   Frontend API base = same origin (/api)"
+  fi
 fi
