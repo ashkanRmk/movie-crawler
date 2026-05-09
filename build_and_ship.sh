@@ -37,7 +37,7 @@ docker buildx build \
 
 docker buildx build \
   --platform $PLATFORM \
-  --build-arg VITE_API_BASE="$FRONTEND_API_BASE" \
+  --build-arg VITE_API_BASE="http://3kans-back.devsquad.ir" \
   -t $FRONTEND_IMAGE:$VERSION \
   --load \
   ./frontend
