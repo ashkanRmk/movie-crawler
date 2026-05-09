@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 builder.Services.AddSingleton<CatalogParser>();
+builder.Services.AddSingleton<ArchiveArtworkLookup>();
 builder.Services.AddSingleton<CatalogCache>();
 builder.Services.AddSingleton<IDirectoryDownloadResolver, DirectoryDownloadResolver>();
 builder.Services.AddSingleton<TvSeriesDirectoryLinksCache>();

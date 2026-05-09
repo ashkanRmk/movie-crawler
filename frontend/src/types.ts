@@ -28,6 +28,7 @@ export interface CatalogItem {
   imdbRate: number;
   imdbVotes: number;
   isDubbed: boolean;
+  imageUrl?: string | null;
   downloads: DownloadGroup[];
   seasons: SeasonGroup[];
 }

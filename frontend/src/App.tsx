@@ -322,6 +322,35 @@ function CardBadges({ item }: { item: CatalogItem }) {
   );
 }
 
+function CatalogCardArt({ item }: { item: CatalogItem }) {
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const artwork = getArtwork(item);
+  const imageUrl = item.imageUrl?.trim();
+
+  useEffect(() => {
+    setImageLoaded(false);
+  }, [imageUrl]);
+
+  return (
+    <div className="card-art" style={{ background: artwork.background }}>
+      {imageUrl ? (
+        <img
+          className={imageLoaded ? "card-art-image loaded" : "card-art-image"}
+          src={imageUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setImageLoaded(true)}
+        />
+      ) : null}
+      <div className="card-art-noise" />
+      <span className="card-imdb-badge">IMDb {item.imdbRate.toFixed(1)}</span>
+      {!imageUrl ? <span className="card-art-initials">{artwork.initials}</span> : <span aria-hidden="true" />}
+      <CardBadges item={item} />
+    </div>
+  );
+}
+
 function DownloadLinksBlock({
   links,
   stateKey,
@@ -663,8 +692,6 @@ function RowCards({ items, onOpen }: { items: CatalogItem[]; onOpen: (itemId: st
       onClickCapture={handleClickCapture}
     >
       {items.map((item) => {
-        const artwork = getArtwork(item);
-
         return (
           <button
             key={item.id}
@@ -673,12 +700,7 @@ function RowCards({ items, onOpen }: { items: CatalogItem[]; onOpen: (itemId: st
             onClick={() => onOpen(item.id)}
             role="listitem"
           >
-            <div className="card-art" style={{ background: artwork.background }}>
-              <div className="card-art-noise" />
-              <span className="card-imdb-badge">IMDb {item.imdbRate.toFixed(1)}</span>
-              <span className="card-art-initials">{artwork.initials}</span>
-              <CardBadges item={item} />
-            </div>
+            <CatalogCardArt item={item} />
 
             <div className="catalog-copy">
               <h3 className="catalog-title" title={item.title}>{item.title}</h3>
@@ -1501,8 +1523,6 @@ export default function App() {
 
               <section className="browse-grid">
                 {gridItems.map((item) => {
-                  const artwork = getArtwork(item);
-
                   return (
                     <button
                       key={item.id}
@@ -1510,12 +1530,7 @@ export default function App() {
                       className="catalog-card"
                       onClick={() => openItem(item.id)}
                     >
-                      <div className="card-art" style={{ background: artwork.background }}>
-                        <div className="card-art-noise" />
-                        <span className="card-imdb-badge">IMDb {item.imdbRate.toFixed(1)}</span>
-                        <span className="card-art-initials">{artwork.initials}</span>
-                        <CardBadges item={item} />
-                      </div>
+                      <CatalogCardArt item={item} />
 
                       <div className="catalog-copy">
                         <h3 className="catalog-title" title={item.title}>{item.title}</h3>
@@ -1581,7 +1596,15 @@ export default function App() {
         >
           {activeItem ? (
             <>
-              <div className="drawer-hero" style={{ background: getArtwork(activeItem).background }}>
+              <div className={activeItem.imageUrl?.trim() ? "drawer-hero has-image" : "drawer-hero"} style={{ background: getArtwork(activeItem).background }}>
+                {activeItem.imageUrl?.trim() ? (
+                  <img
+                    className="drawer-hero-image"
+                    src={activeItem.imageUrl}
+                    alt=""
+                    decoding="async"
+                  />
+                ) : null}
                 <div className="drawer-hero-overlay" />
                 <button type="button" className="drawer-close" onClick={closeDrawer}>
                   بستن

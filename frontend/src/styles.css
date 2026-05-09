@@ -383,6 +383,22 @@ button {
     linear-gradient(0deg, rgba(0, 0, 0, 0.35), transparent 55%);
 }
 
+.card-art-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1.02);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.card-art-image.loaded {
+  opacity: 1;
+  transform: scale(1);
+}
+
 .card-art-initials,
 .card-art-badges {
   position: relative;
@@ -558,12 +574,28 @@ button {
   overflow: hidden;
 }
 
+.drawer-hero-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.18);
+  transform-origin: center;
+}
+
 .drawer-hero-overlay {
   position: absolute;
   inset: 0;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.54) 100%),
     linear-gradient(120deg, rgba(255, 255, 255, 0.06), transparent 40%);
+}
+
+.drawer-hero.has-image .drawer-hero-overlay {
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.16) 0%, rgba(0, 0, 0, 0.82) 100%),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.58), rgba(0, 0, 0, 0.18) 58%, rgba(0, 0, 0, 0.34));
 }
 
 .drawer-close {

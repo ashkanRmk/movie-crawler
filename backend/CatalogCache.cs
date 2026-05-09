@@ -7,6 +7,7 @@ public sealed class CatalogCache
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly CatalogParser _parser;
+    private readonly ArchiveArtworkLookup _artworkLookup;
     private readonly ILogger<CatalogCache> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly string _sourceUrl;
@@ -18,11 +19,13 @@ public sealed class CatalogCache
     public CatalogCache(
         IHttpClientFactory httpClientFactory,
         CatalogParser parser,
+        ArchiveArtworkLookup artworkLookup,
         IConfiguration configuration,
         ILogger<CatalogCache> logger)
     {
         _httpClientFactory = httpClientFactory;
         _parser = parser;
+        _artworkLookup = artworkLookup;
         _logger = logger;
         _sourceUrl = configuration["Catalog:SourceUrl"]
             ?? "https://dls.iran-gamecenter-host.com/DonyayeSerial/offline_archive.html";
@@ -57,7 +60,7 @@ public sealed class CatalogCache
             var html = encoding.GetString(bytes);
 
             var fetchedAt = DateTimeOffset.UtcNow;
-            _catalog = _parser.Parse(html, _sourceUrl, fetchedAt);
+            _catalog = _artworkLookup.Enrich(_parser.Parse(html, _sourceUrl, fetchedAt));
             _lastFetchInfo = new CatalogFetchInfo
             {
                 FetchedAt = fetchedAt,
