@@ -833,6 +833,10 @@ export default function App() {
   const canLoadMoreCategory =
     !isSearchMode && browseMode !== "home" && categoryRenderedCount < categoryItems.length;
 
+  const loadNextCategoryBatch = () => {
+    setCategoryRenderedCount((prev) => Math.min(prev + 20, categoryItems.length));
+  };
+
   const activeItem = useMemo(
     () => items.find((item) => item.id === activeId) ?? null,
     [activeId, items]
@@ -872,11 +876,20 @@ export default function App() {
       return;
     }
 
+    const loadIfNearViewport = () => {
+      const rect = node.getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+
+      if (rect.top <= viewportHeight + 320) {
+        loadNextCategoryBatch();
+      }
+    };
+
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
-            setCategoryRenderedCount((prev) => Math.min(prev + 20, categoryItems.length));
+            loadNextCategoryBatch();
           }
         });
       },
@@ -884,8 +897,17 @@ export default function App() {
     );
 
     observer.observe(node);
-    return () => observer.disconnect();
-  }, [canLoadMoreCategory, categoryItems.length]);
+    const rafId = window.requestAnimationFrame(loadIfNearViewport);
+    window.addEventListener("scroll", loadIfNearViewport, { passive: true });
+    window.addEventListener("resize", loadIfNearViewport);
+
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener("scroll", loadIfNearViewport);
+      window.removeEventListener("resize", loadIfNearViewport);
+    };
+  }, [canLoadMoreCategory, categoryItems.length, categoryRenderedCount]);
 
   useEffect(() => {
     if (activeId && !filteredItems.some((item) => item.id === activeId)) {
@@ -921,16 +943,13 @@ export default function App() {
 
     const { body } = document;
     const previousOverflow = body.style.overflow;
-    const previousTouchAction = body.style.touchAction;
     const previousOverscrollBehavior = body.style.overscrollBehavior;
 
     body.style.overflow = "hidden";
-    body.style.touchAction = "none";
     body.style.overscrollBehavior = "none";
 
     return () => {
       body.style.overflow = previousOverflow;
-      body.style.touchAction = previousTouchAction;
       body.style.overscrollBehavior = previousOverscrollBehavior;
     };
   }, [isDrawerOpen]);
